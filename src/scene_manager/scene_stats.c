@@ -136,9 +136,16 @@ static void StatNode(GF_SceneStatistics *stat, GF_Node *n, Bool isUsed, Bool isD
 	else ptr->nb_created += prev ? (prev->sgprivate->num_instances - 1) : 1;
 }
 
+#ifndef GPAC_DISABLE_SVG
+
 static void StatFixed(GF_SceneStatistics *stat, Fixed v, Bool scale)
 {
 	u32 int_res, frac_res;
+	if (v > 32767.0)
+		v = 32767.0;
+	else if (v < -32768.0)
+		v = -32768.0;
+
 	u32 fixv  = FIX2INT((v>0?v:-v) * (1<<16));
 	s32 intv  = (fixv & 0xFFFF0000)>>16;
 	u32 fracv = fixv & 0x0000FFFF;
@@ -167,7 +174,6 @@ static void StatFixed(GF_SceneStatistics *stat, Fixed v, Bool scale)
 }
 
 
-
 static void StatSVGPoint(GF_SceneStatistics *stat, SFVec2f *val)
 {
 	if (!stat) return;
@@ -178,6 +184,7 @@ static void StatSVGPoint(GF_SceneStatistics *stat, SFVec2f *val)
 	StatFixed(stat, val->x, 0);
 	StatFixed(stat, val->y, 0);
 }
+#endif
 
 static void StatSFVec2f(GF_SceneStatistics *stat, SFVec2f *val)
 {
@@ -263,6 +270,7 @@ static void StatSingleField(GF_SceneStatistics *stat, GF_FieldInfo *field)
 	}
 }
 
+#ifndef GPAC_DISABLE_SVG
 static void StatSVGAttribute(GF_SceneStatistics *stat, GF_FieldInfo *field)
 {
 	u32 i = 0;
@@ -340,6 +348,7 @@ static void StatSVGAttribute(GF_SceneStatistics *stat, GF_FieldInfo *field)
 		break;
 	}
 }
+#endif
 
 static void StatRemField(GF_SceneStatistics *stat, u32 fieldType, GF_FieldInfo *field)
 {
@@ -472,6 +481,7 @@ GF_Err gf_sm_stats_for_command(GF_StatManager *stat, GF_Command *com)
 	GF_FieldInfo field;
 	GF_Err e;
 	GF_ChildNodeItem *list;
+	u32 i;
 	GF_CommandField *inf = NULL;
 	if (gf_list_count(com->command_fields))
 		inf = (GF_CommandField*)gf_list_get(com->command_fields, 0);
@@ -494,15 +504,19 @@ GF_Err gf_sm_stats_for_command(GF_StatManager *stat, GF_Command *com)
 			if (inf->new_node) StatNodeGraph(stat, inf->new_node);
 			break;
 		case GF_SG_VRML_MFNODE:
-			list = * ((GF_ChildNodeItem**) inf->field_ptr);
-			while (list) {
-				StatNodeGraph(stat, list->node);
-				list = list->next;
+			if (inf) {
+				list = * ((GF_ChildNodeItem**) inf->field_ptr);
+				while (list) {
+					StatNodeGraph(stat, list->node);
+					list = list->next;
+				}
 			}
 			break;
 		default:
-			field.far_ptr = inf->field_ptr;
-			StatField(stat->stats, &field);
+			if (inf) {
+				field.far_ptr = inf->field_ptr;
+				StatField(stat->stats, &field);
+			}
 			break;
 		}
 		break;
@@ -520,6 +534,8 @@ GF_Err gf_sm_stats_for_command(GF_StatManager *stat, GF_Command *com)
 		}
 		break;
 	case GF_SG_NODE_DELETE:
+	case GF_SG_NODE_DELETE_EX:
+	case GF_SG_GLOBAL_QUANTIZER:
 		if (com->node) StatNode(stat->stats, com->node, 0, 1, NULL);
 		break;
 	case GF_SG_INDEXED_DELETE:
@@ -556,6 +572,43 @@ GF_Err gf_sm_stats_for_command(GF_StatManager *stat, GF_Command *com)
 	case GF_SG_ROUTE_DELETE:
 	case GF_SG_ROUTE_INSERT:
 		return GF_OK;
+	case GF_SG_XREPLACE:
+		if (!inf) return GF_OK;
+		e = gf_node_get_field(com->node, inf->fieldIndex, &field);
+		if (e) return e;
+
+		/*rescale the MFField and parse the SFField*/
+		if (field.fieldType != GF_SG_VRML_MFNODE) {
+			field.fieldType = gf_sg_vrml_get_sf_type(field.fieldType);
+			field.far_ptr = inf->field_ptr;
+			StatSingleField(stat->stats, &field);
+		} else {
+			if (inf->new_node) StatNodeGraph(stat, inf->new_node);
+		}
+
+		break;
+	case GF_SG_MULTIPLE_REPLACE:
+	case GF_SG_MULTIPLE_INDEXED_REPLACE:
+		for (i=0; i<gf_list_count(com->command_fields); i++) {
+			inf = (GF_CommandField*)gf_list_get(com->command_fields, i);
+			e = gf_node_get_field(com->node, inf->fieldIndex, &field);
+			if (e) return e;
+
+			/*rescale the MFField and parse the SFField*/
+			if (field.fieldType != GF_SG_VRML_MFNODE) {
+				field.fieldType = gf_sg_vrml_get_sf_type(field.fieldType);
+				field.far_ptr = inf->field_ptr;
+				StatSingleField(stat->stats, &field);
+			} else {
+				if (inf->new_node) StatNodeGraph(stat, inf->new_node);
+			}
+		}
+		break;
+	case GF_SG_PROTO_INSERT:
+	case GF_SG_PROTO_DELETE:
+	case GF_SG_PROTO_DELETE_ALL:
+		return GF_OK;
+
 	default:
 		return GF_BAD_PARAM;
 	}
@@ -629,7 +682,7 @@ void gf_sm_stats_del(GF_StatManager *stat)
 }
 
 GF_EXPORT
-GF_SceneStatistics *gf_sm_stats_get(GF_StatManager *stat)
+const GF_SceneStatistics *gf_sm_stats_get(GF_StatManager *stat)
 {
 	return stat->stats;
 }

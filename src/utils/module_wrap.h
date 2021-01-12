@@ -32,10 +32,13 @@
 
 #define MAX_MODULE_DIRS 1024
 
+typedef struct __tag_mod_man GF_ModuleManager;
+
 /* interface api*/
 typedef const u32 *(*QueryInterfaces) ();
 typedef void * (*LoadInterface) (u32 InterfaceType);
 typedef void (*ShutdownInterface) (void *interface_obj);
+typedef void * (*LoadFilterRegister) (void *fsess);
 
 
 typedef struct
@@ -52,6 +55,7 @@ typedef struct
 	QueryInterfaces query_func;
 	LoadInterface load_func;
 	ShutdownInterface destroy_func;
+	LoadFilterRegister filterreg_func;
 	char* dir;
 } ModuleInstance;
 
@@ -59,11 +63,12 @@ typedef struct
 struct __tag_mod_man
 {
 	/*location of the modules*/
-	const char* dirs[MAX_MODULE_DIRS];
+	char* dirs[MAX_MODULE_DIRS];
 	u32 num_dirs;
 	GF_List *plug_list;
 	GF_Config *cfg;
 	Bool no_unload;
+	Bool needs_load;
 	/*the one and only ssl instance used throughout the client engine*/
 	void *ssl_inst;
 

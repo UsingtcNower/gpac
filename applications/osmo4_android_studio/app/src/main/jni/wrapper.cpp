@@ -30,8 +30,8 @@
 #include <gpac/terminal.h>
 #include <gpac/thread.h>
 #include <gpac/options.h>
-#include <gpac/modules/service.h>
-#include <gpac/internal/terminal_dev.h>
+#include <gpac/network.h>
+//#include <gpac/internal/terminal_dev.h>
 #include <gpac/internal/compositor_dev.h>
 
 #include "wrapper.h"
@@ -52,6 +52,13 @@
 static JavaVM* javaVM = NULL;
 
 static pthread_key_t jni_thread_env_key = 0;
+
+struct _tag_terminal
+{
+	GF_User *user;
+	GF_Compositor *compositor;
+	GF_FilterSession *fsess;
+};
 
 //these two are used by modumles - define them when using static module build
 #ifdef GPAC_STATIC_MODULES
@@ -180,6 +187,7 @@ jint JNI_OnUnLoad(JavaVM* vm, void* reserved) {
 	}
 	javaVM = NULL;
 	jni_thread_env_key = (int) NULL;
+	return 0;
 }
 
 #define NUM_JNI_VERSIONS 4
@@ -193,7 +201,7 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved) {
 	allowedVersions[1] = JNI_VERSION_1_4;
 	allowedVersions[2] = JNI_VERSION_1_2;
 	allowedVersions[3] = JNI_VERSION_1_1;
-	JNIEnv * env;
+	JNIEnv * env = NULL;
 	if (!vm)
 		return -1;
 	for (int i = 0 ; i < NUM_JNI_VERSIONS; i++) {
@@ -208,6 +216,10 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved) {
 			}
 		}
 
+	}
+	if (! env) {
+		LOGW("Failed to find any supported JNI VERSION");
+		return -1;
 	}
 	javaVM = vm;
 	LOGI("Registering %s natives\n", className);
@@ -233,6 +245,16 @@ CNativeWrapper::CNativeWrapper() {
 	m_term = NULL;
 	m_mx = NULL;
 	mainJavaEnv = NULL;
+
+	log_file = NULL;
+	m_window = NULL;
+	m_session = NULL;
+
+	m_cfg_dir[0]=0;
+	m_modules_dir[0]=0;
+	m_cache_dir[0]=0;
+	m_font_dir[0]=0;
+
 #ifndef GPAC_GUI_ONLY
 	memset(&m_user, 0, sizeof(GF_User));
 	memset(&m_rti, 0, sizeof(GF_SystemRTInfo));
@@ -244,6 +266,8 @@ CNativeWrapper::~CNativeWrapper() {
 	JavaEnvTh * env = getEnv();
 	if (env && env->cbk_obj)
 		env->env->DeleteGlobalRef(env->cbk_obj);
+	if (log_file) gf_fclose(log_file);
+	log_file = NULL;
 	Shutdown();
 	debug_log("~CNativeWrapper() : DONE\n");
 }
@@ -266,6 +290,7 @@ void CNativeWrapper::Shutdown()
 		m_term = NULL;
 		gf_term_del(t);
 	}
+	/*
 	if (m_user.config) {
 		gf_cfg_del(m_user.config);
 		m_user.config = NULL;
@@ -273,7 +298,7 @@ void CNativeWrapper::Shutdown()
 	if (m_user.modules) {
 		gf_modules_del(m_user.modules);
 		m_user.modules = NULL;
-	}
+	}*/
 #endif
 	m_term = NULL;
 	gf_sys_close();
@@ -304,11 +329,13 @@ void CNativeWrapper::setJavaEnv(JavaEnvTh * envToSet, JNIEnv *env, jobject callb
 }
 
 static u32 beforeThreadExits(void * param) {
-	/* Ivica - I think there is no need for this because the detach is done in jni_destroy_env_func()
+	/* Ivica - I think there is no need for this because the detach is done in jni_destroy_env_func()*/
+
 	/*LOGI("Before Thread exist, detach the JavaVM from Thread for thread %p...\n", gf_th_current());
 	if (javaVM)
 	javaVM->DetachCurrentThread();
 	*/
+	return 0;
 }
 
 JavaEnvTh * CNativeWrapper::getEnv() {
@@ -369,12 +396,6 @@ int CNativeWrapper::MessageBox(const char* msg, const char* title, GF_Err status
 	return 1;
 }
 //-------------------------------
-void CNativeWrapper::DisplayRTI() {
-#ifndef GPAC_GUI_ONLY
-	// display some system informations ?
-#endif
-}
-//-------------------------------
 int CNativeWrapper::Quit(int code) {
 
 	Shutdown();
@@ -417,6 +438,7 @@ void CNativeWrapper::on_gpac_log(void *cbk, GF_LOG_Level ll, GF_LOG_Tool lm, con
 	if (!self)
 		goto displayInAndroidlogs;
 
+#if 0
 	{
 		JavaEnvTh *env = self->getEnv();
 		jstring msg;
@@ -430,6 +452,15 @@ void CNativeWrapper::on_gpac_log(void *cbk, GF_LOG_Level ll, GF_LOG_Tool lm, con
 		env->env->PopLocalFrame(NULL);
 		return;
 	}
+
+#else
+	if (self->log_file) {
+		vfprintf(self->log_file, fmt, list);
+		fflush(self->log_file);
+	}
+#endif
+
+
 displayInAndroidlogs:
 	{
 		/* When no callback is properly set, we use direct logging */
@@ -526,7 +557,7 @@ displayInAndroidlogs:
 Bool CNativeWrapper::GPAC_EventProc(void *cbk, GF_Event *evt) {
 	if (cbk)
 	{
-		CNativeWrapper* ptr = (CNativeWrapper*)cbk;
+		CNativeWrapper* ptr = (CNativeWrapper *) cbk;
 		char msg[4096];
 		msg[0] = 0;
 		LOGD("GPAC_EventProc() Message=%d", evt->type);
@@ -678,10 +709,11 @@ void CNativeWrapper::SetupLogs() {
 	debug_log("SetupLogs()");
 
 	gf_mx_p(m_mx);
-	gf_log_set_tools_levels( gf_cfg_get_key(m_user.config, "General", "Logs") );
+	gf_log_set_tools_levels( gf_opts_get_key("core", "logs"), GF_TRUE );
 	gf_log_set_callback(this, on_gpac_log);
-	opt = gf_cfg_get_key(m_user.config, "General", "LogFile");
+	opt = gf_opts_get_key("core", "log-file");
 	if (opt) {
+#if 0
 		JavaEnvTh *env = getEnv();
 		if (env && env->cbk_setLogFile) {
 			env->env->PushLocalFrame(1);
@@ -689,6 +721,9 @@ void CNativeWrapper::SetupLogs() {
 			env->env->CallVoidMethod(env->cbk_obj, env->cbk_setLogFile, js);
 			env->env->PopLocalFrame(NULL);
 		}
+#else
+		log_file = gf_fopen(opt, "wt");
+#endif
 	}
 	gf_mx_v(m_mx);
 
@@ -709,17 +744,17 @@ int CNativeWrapper::init(JNIEnv * env, void * bitmap, jobject * callback, int wi
 	if (cfg_dir)
 		strcpy(m_cfg_dir, cfg_dir);
 
-	char m_cfg_filename[GF_MAX_PATH];
-	if (m_cfg_dir) {
+/*	char m_cfg_filename[GF_MAX_PATH];
+	if (m_cfg_dir[0]) {
 		LOGI("GPAC.cfg found in %s, force using it.\n", m_cfg_dir);
 		strcpy(m_cfg_filename, m_cfg_dir);
 		strcat(m_cfg_filename, "GPAC.cfg");
 	}
+*/
 
 	int m_Width = width;
 	int m_Height = height;
 
-	int first_launch = 0;
 	const char *opt;
 
 	m_window = env;
@@ -734,37 +769,7 @@ int CNativeWrapper::init(JNIEnv * env, void * bitmap, jobject * callback, int wi
 
 	m_mx = gf_mx_new("Osmo4");
 
-	//load config file
-	LOGI("Loading User Config %s...", "GPAC.cfg");
-	m_user.config = gf_cfg_init(m_cfg_dir ? m_cfg_filename : NULL, NULL);
-	gf_set_progress_callback(this, Osmo4_progress_cbk);
-
-
-	char path[512];
-	strcpy(path, gui_dir);
-	char vertex_path[512], fragment_path[512];
-	strcpy(vertex_path, path);
-	strcpy(fragment_path, path);
-	strcat(vertex_path, "/../shaders/vertex.glsl");
-	strcat(fragment_path, "/../shaders/fragment.glsl");
-
-	gf_cfg_set_key(m_user.config, "Compositor", "VertexShader", vertex_path);
-	gf_cfg_set_key(m_user.config, "Compositor", "FragmentShader", fragment_path);
-	gf_cfg_set_key(m_user.config, "Compositor", "OpenGLMode", "hybrid");
-	opt = gf_cfg_get_key(m_user.config, "General", "ModulesDirectory");
-	LOGI("loading modules in directory %s...", opt);
-	m_user.modules = gf_modules_new(opt, m_user.config);
-	if (!m_user.modules || !gf_modules_get_count(m_user.modules)) {
-		LOGE("No modules found in directory %s !", opt);
-		if (m_user.modules)
-			gf_modules_del(m_user.modules);
-		gf_cfg_del(m_user.config);
-		m_user.config = NULL;
-		return Quit(KErrGeneral);
-	}
-
-	/*we don't thread the visual compositor to be able to minimize the app and still have audio running*/
-	m_user.init_flags = GF_TERM_NO_COMPOSITOR_THREAD;
+	m_user.init_flags = 0;
 	m_user.opaque = this;
 
 	m_user.os_window_handler = m_window;
@@ -776,17 +781,49 @@ int CNativeWrapper::init(JNIEnv * env, void * bitmap, jobject * callback, int wi
 	}
 
 	LOGD("Loading GPAC terminal, m_user=%p...", &m_user);
-	gf_sys_init(GF_MemTrackerNone);
+	gf_sys_init(GF_MemTrackerNone, NULL);
 	gf_fm_request_set_callback(this, on_fm_request);
+
+	gf_set_progress_callback(this, Osmo4_progress_cbk);
+
+	//load config file
+	//LOGI("Loading User Config %s...", "GPAC.cfg");
+	//m_user.config = gf_cfg_init(m_cfg_dir ? m_cfg_filename : NULL, NULL);
+
+
+	char path[512];
+	strcpy(path, gui_dir);
+	char vertex_path[512], fragment_path[512];
+	strcpy(vertex_path, path);
+	strcpy(fragment_path, path);
+	strcat(vertex_path, "/../shaders/vertex.glsl");
+	strcat(fragment_path, "/../shaders/fragment.glsl");
+
+	gf_opts_set_key("core", "vert-shader", vertex_path);
+	gf_opts_set_key("core", "frag-shader", fragment_path);
+	gf_opts_set_key("filter@compositor", "ogl", "hybrid");
+	opt = gf_opts_get_key("core", "mod-dirs");
+	LOGI("loading modules in directory %s...", opt);
+
+	/*m_user.modules = gf_modules_new(opt, m_user.config);
+	if (!m_user.modules || !gf_modules_get_count(m_user.modules)) {
+		LOGE("No modules found in directory %s !", opt);
+		if (m_user.modules)
+			gf_modules_del(m_user.modules);
+		gf_cfg_del(m_user.config);
+		m_user.config = NULL;
+		return Quit(KErrGeneral);
+	}*/
+
 	SetupLogs();
 	m_term = gf_term_new(&m_user);
 	if (!m_term) {
 		LOGE("Cannot load GPAC Terminal with m_user=%p", &m_user);
 		MessageBox("Cannot load GPAC terminal", "Fatal Error", GF_SERVICE_ERROR);
-		gf_modules_del(m_user.modules);
+		/*gf_modules_del(m_user.modules);
 		m_user.modules = NULL;
 		gf_cfg_del(m_user.config);
-		m_user.config = NULL;
+		m_user.config = NULL;*/
 		return Quit(KErrGeneral);
 	}
 
@@ -798,7 +835,7 @@ int CNativeWrapper::init(JNIEnv * env, void * bitmap, jobject * callback, int wi
 	LOGD("Setting term size m_user=%p...", &m_user);
 	gf_term_set_size(m_term, m_Width, m_Height);
 
-	opt = gf_cfg_get_key(m_user.config, "General", "StartupFile");
+	opt = gf_opts_get_key("General", "StartupFile");
 	LOGD("File loaded at startup=%s.", opt);
 
 	if (!urlToLoad)
@@ -809,7 +846,7 @@ int CNativeWrapper::init(JNIEnv * env, void * bitmap, jobject * callback, int wi
 	}
 	debug_log("init end");
 	LOGD("Saving config file...\n");
-	gf_cfg_save(m_user.config);
+	//gf_cfg_save(m_user.config);
 	LOGI("Initialization complete, config file saved.\n");
 
 	return 0;
@@ -817,16 +854,14 @@ int CNativeWrapper::init(JNIEnv * env, void * bitmap, jobject * callback, int wi
 //-------------------------------
 int CNativeWrapper::connect(const char *url)
 {
-	const char *str;
-	char the_url[256];
-
 	if (m_term)
 	{
+		const char *str;
 		debug_log("Starting to connect ...");
-		str = gf_cfg_get_key(m_user.config, "General", "StartupFile");
+		str = gf_opts_get_key("General", "StartupFile");
 		if (str)
 		{
-			gf_cfg_set_key(m_user.config, "Temp", "GUIStartupFile", url);
+			gf_opts_set_key("Temp", "GUIStartupFile", url);
 			gf_term_connect(m_term, str);
 		}
 		if( url )
@@ -835,14 +870,15 @@ int CNativeWrapper::connect(const char *url)
 		}
 	}
 	debug_log("connected ...");
+	return 0;
 }
 
 void CNativeWrapper::setGpacPreference( const char * category, const char * name, const char * value)
 {
-	if (m_user.config) {
-		gf_cfg_set_key(m_user.config, category, name, value);
-		gf_cfg_save(m_user.config);
-	}
+	//if (m_user.config) {
+		gf_opts_set_key(category, name, value);
+	//	gf_cfg_save(m_user.config);
+	//}
 }
 
 //-----------------------------------------------------
@@ -857,20 +893,11 @@ void CNativeWrapper::disconnect() {
 void CNativeWrapper::step(void * env, void * bitmap) {
 	m_window = env;
 	m_session = bitmap;
-	//debug_log("Step ...");
-	if (!m_term) {
-		debug_log("step(): No m_term found.");
-		return;
-	} else if (!m_term->compositor)
-		debug_log("step(): No compositor found.");
-	else if (!m_term->compositor->video_out)
-		debug_log("step(): No video_out found");
-	else if (!m_term->compositor->video_out->Setup)
-		debug_log("step(): No video_out->Setup found");
-	else {
-		m_term->compositor->frame_draw_type = GF_SC_DRAW_FRAME;
-		gf_term_process_step(m_term);
+	m_term->compositor->frame_draw_type = GF_SC_DRAW_FRAME;
+	while (!gf_term_process_step(m_term)) {
+		debug_log("step(): nothing drawn, retrying\n");
 	}
+	debug_log("step(): frame drawn\n");
 }
 
 //-----------------------------------------------------
@@ -880,7 +907,7 @@ void CNativeWrapper::setAudioEnvironment(JavaVM* javaVM) {
 		return;
 	}
 	debug_log("setAudioEnvironment start");
-	m_term->compositor->audio_renderer->audio_out->Setup(m_term->compositor->audio_renderer->audio_out, javaVM, 0, 0);
+	//m_term->compositor->audio_renderer->audio_out->Setup(m_term->compositor->audio_renderer->audio_out, javaVM, 0, 0);
 	debug_log("setAudioEnvironment end");
 }
 //-----------------------------------------------------
@@ -907,7 +934,7 @@ void CNativeWrapper::onMouseDown(float x, float y) {
 	evt.mouse.x = x;
 	evt.mouse.y = y;
 
-	int ret = gf_term_user_event(m_term, &evt);
+	gf_term_user_event(m_term, &evt);
 	debug_log("onMouseDown end");
 }
 //-----------------------------------------------------
@@ -925,7 +952,7 @@ void CNativeWrapper::onMouseUp(float x, float y) {
 	evt.mouse.x = x;
 	evt.mouse.y = y;
 
-	int ret = gf_term_user_event(m_term, &evt);
+	gf_term_user_event(m_term, &evt);
 	debug_log("onMouseUp end");
 }
 //-----------------------------------------------------
@@ -938,7 +965,7 @@ void CNativeWrapper::onMouseMove(float x, float y) {
 	evt.mouse.x = x;
 	evt.mouse.y = y;
 
-	int ret = gf_term_user_event(m_term, &evt);
+	gf_term_user_event(m_term, &evt);
 }
 //-----------------------------------------------------
 void CNativeWrapper::onKeyPress(int keycode, int rawkeycode, int up, int flag, int unicode) {
@@ -955,13 +982,13 @@ void CNativeWrapper::onKeyPress(int keycode, int rawkeycode, int up, int flag, i
 
 	translate_key(keycode, &evt.key);
 	//evt.key.key_code = GF_KEY_A;
-	int ret = gf_term_user_event(m_term, &evt);
+	gf_term_user_event(m_term, &evt);
 
 	if (evt.type == GF_EVENT_KEYUP && unicode) {
 		memset(&evt, 0, sizeof(GF_Event));
 		evt.type = GF_EVENT_TEXTINPUT;
 		evt.character.unicode_char = unicode;
-		ret = gf_term_user_event(m_term, &evt);
+		gf_term_user_event(m_term, &evt);
 	}
 }
 //-----------------------------------------------------
@@ -1086,12 +1113,12 @@ void CNativeWrapper::onOrientationChange(float x, float y, float z) {
 	evt.sensor.z = z;
 	evt.sensor.w = 0;
 
-	int ret = gf_term_user_event(m_term, &evt);
+	gf_term_user_event(m_term, &evt);
 }
 //-----------------------------------------------------
 void CNativeWrapper::setGpacLogs(const char *tools_at_level)
 {
-	gf_log_set_tools_levels(tools_at_level);
+	gf_log_set_tools_levels(tools_at_level, GF_TRUE);
 }
 
 //---------------------------------------------------------------------------------------------------

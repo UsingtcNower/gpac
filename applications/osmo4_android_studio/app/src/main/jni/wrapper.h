@@ -33,7 +33,7 @@
 #include <gpac/terminal.h>
 #include <gpac/thread.h>
 #include <gpac/options.h>
-#include <gpac/modules/service.h>
+#include <gpac/network.h>
 
 //#define		MAX_PATH	255
 
@@ -50,10 +50,6 @@
 #define		GPAC_LOG_FILE m_log_filename
 //#define		GPAC_FONT_DIR "/system/fonts/"
 #define		GPAC_FONT_DIR m_font_dir
-
-#define		DEBUG_MODE	1
-//#define		DEBUG_FILE	"/data/osmo/osmo_debug.txt"
-#define		DEBUG_FILE	m_debug_filename
 
 // keyboard code
 #define ANDROID_KEYCODE		int
@@ -161,7 +157,6 @@ typedef struct _JavaEnvTh {
 	jmethodID cbk_sensorSwitch;
 } JavaEnvTh;
 
-
 //---------------------------------------------------------------------------------------------------
 //---------------------------------------------------------------------------------------------------
 class CNativeWrapper {
@@ -170,9 +165,6 @@ private:
 	void* m_window;
 	void* m_session;
 
-	GF_User *GetUser() {
-		return &m_user;
-	}
 	GF_Terminal *m_term;
 
 	/*
@@ -185,6 +177,8 @@ private:
 	GF_SystemRTInfo m_rti;
 
 	int	do_log;
+	FILE	*log_file;
+
 private:
 	char m_cfg_dir[GF_MAX_PATH];
 	char m_modules_dir[GF_MAX_PATH];
@@ -194,7 +188,6 @@ private:
 private:
 	void SetupLogs();
 	void Shutdown();
-	void DisplayRTI();
 protected:
 	JavaEnvTh * getEnv();
 
@@ -229,9 +222,6 @@ public:
 	static void Osmo4_progress_cbk(const void *usr, const char *title, u64 done, u64 total);
 
 private:
-#ifdef	DEBUG_MODE
-	FILE	*debug_f;
-#endif
 	void debug_log(const char* msg);
 
 };

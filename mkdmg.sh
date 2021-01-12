@@ -41,14 +41,14 @@ mkdir -p tmpdmg/GPAC.app/Contents/MacOS/modules
 mkdir -p tmpdmg/GPAC.app/Contents/MacOS/lib
 
 cp bin/gcc/gm* tmpdmg/GPAC.app/Contents/MacOS/modules
+cp bin/gcc/gf_* tmpdmg/GPAC.app/Contents/MacOS/modules
 cp bin/gcc/libgpac.dylib tmpdmg/GPAC.app/Contents/MacOS/lib
+if [ -f bin/gcc/libopenhevc.1.dylib ]; then
+    cp bin/gcc/libopenhevc.1.dylib tmpdmg/GPAC.app/Contents/MacOS/lib
+fi
 cp bin/gcc/MP4Client tmpdmg/GPAC.app/Contents/MacOS/Osmo4
 cp bin/gcc/MP4Box tmpdmg/GPAC.app/Contents/MacOS/MP4Box
-cp bin/gcc/MP42TS tmpdmg/GPAC.app/Contents/MacOS/MP42TS
-if [ -f bin/gcc/DashCast ]
-then
-cp bin/gcc/DashCast tmpdmg/GPAC.app/Contents/MacOS/DashCast
-fi
+cp bin/gcc/gpac tmpdmg/GPAC.app/Contents/MacOS/gpac
 
 cd tmpdmg/GPAC.app/Contents/MacOS/
 
@@ -59,30 +59,24 @@ do
   rewrite_deps $dylib
 done
 
-if [ -f DashCast ]
-then
-  rewrite_deps DashCast
-fi
-
 echo rewriting APPS dependencies
 install_name_tool -change /usr/local/lib/libgpac.dylib @executable_path/lib/libgpac.dylib Osmo4
 install_name_tool -change /usr/local/lib/libgpac.dylib @executable_path/lib/libgpac.dylib MP4Box
-install_name_tool -change /usr/local/lib/libgpac.dylib @executable_path/lib/libgpac.dylib MP42TS
+install_name_tool -change /usr/local/lib/libgpac.dylib @executable_path/lib/libgpac.dylib gpac
 install_name_tool -change ../bin/gcc/libgpac.dylib @executable_path/lib/libgpac.dylib Osmo4
 install_name_tool -change ../bin/gcc/libgpac.dylib @executable_path/lib/libgpac.dylib MP4Box
-install_name_tool -change ../bin/gcc/libgpac.dylib @executable_path/lib/libgpac.dylib MP42TS
-
-if [ -f DashCast ]
-then
-install_name_tool -change /usr/local/lib/libgpac.dylib @executable_path/lib/libgpac.dylib DashCast
-install_name_tool -change ../bin/gcc/libgpac.dylib @executable_path/lib/libgpac.dylib DashCast
-fi
+install_name_tool -change ../bin/gcc/libgpac.dylib @executable_path/lib/libgpac.dylib gpac
 
 cd ../../../..
 
-echo Copying GUI
-rsync -r --exclude=.git $source_path/gui ./tmpdmg/GPAC.app/Contents/MacOS/
-rsync -r --exclude=.git $source_path/shaders ./tmpdmg/GPAC.app/Contents/MacOS/
+echo Copying shared resources
+rsync -r --exclude=.git $source_path/share/res ./tmpdmg/GPAC.app/Contents/MacOS/share/
+rsync -r --exclude=.git $source_path/share/gui ./tmpdmg/GPAC.app/Contents/MacOS/share/
+rsync -r --exclude=.git $source_path/share/vis ./tmpdmg/GPAC.app/Contents/MacOS/share/
+rsync -r --exclude=.git $source_path/share/shaders ./tmpdmg/GPAC.app/Contents/MacOS/share/
+rsync -r --exclude=.git $source_path/share/scripts ./tmpdmg/GPAC.app/Contents/MacOS/share/
+rsync -r --exclude=.git $source_path/share/python ./tmpdmg/GPAC.app/Contents/MacOS/share/
+cp $source_path/share/default.cfg ./tmpdmg/GPAC.app/Contents/MacOS/share/
 
 echo Building DMG
 version=`grep '#define GPAC_VERSION ' $source_path/include/gpac/version.h | cut -d '"' -f 2`
@@ -101,7 +95,7 @@ then
 	full_version="$full_version-rev$rev"
 else
 	#if no revision can be extracted, use date
-   	$rev = $(date +%Y%m%d)
+   	rev = $(date +%Y%m%d)
 fi
 
 sed 's/<string>.*<\/string><!-- VERSION_REV_REPLACE -->/<string>'"$version"'<\/string>/' tmpdmg/GPAC.app/Contents/Info.plist > tmpdmg/GPAC.app/Contents/Info.plist.new && sed 's/<string>.*<\/string><!-- BUILD_REV_REPLACE -->/<string>'"$rev"'<\/string>/' tmpdmg/GPAC.app/Contents/Info.plist.new > tmpdmg/GPAC.app/Contents/Info.plist && rm tmpdmg/GPAC.app/Contents/Info.plist.new

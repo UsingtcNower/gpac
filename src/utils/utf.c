@@ -248,7 +248,7 @@ ConversionResult ConvertUTF16toUTF8 (
  * definition of UTF-8 goes up to 4-byte sequences.
  */
 
-static Boolean isLegalUTF8(const UTF8 *source, int length) {
+Boolean isLegalUTF8(const UTF8 *source, int length) {
 	UTF8 a;
 	const UTF8 *srcptr = source+length;
 	switch (length) {
@@ -375,6 +375,64 @@ ConversionResult ConvertUTF8toUTF16 (
 }
 
 
+GF_EXPORT
+Bool gf_utf8_is_legal(const u8 *data, u32 length)
+{
+	//we simply run ConvertUTF8toUTF16 without target
+	const UTF8** sourceStart = (const UTF8**) &data;
+	const UTF8* sourceEnd = (const UTF8*) ( data + length );
+	ConversionResult result = conversionOK;
+	const UTF8* source = *sourceStart;
+
+	while (source < sourceEnd) {
+		UTF32 ch = 0;
+		unsigned short extraBytesToRead = trailingBytesForUTF8[*source];
+		if (source + extraBytesToRead >= sourceEnd) {
+			result = sourceExhausted;
+			break;
+		}
+		/* Do this check whether lenient or strict */
+		if (! isLegalUTF8(source, extraBytesToRead+1)) {
+			result = sourceIllegal;
+			break;
+		}
+		/*
+		 * The cases all fall through. See "Note A" below.
+		 */
+		switch (extraBytesToRead) {
+		case 5:
+			ch += *source++;
+			ch <<= 6; /* remember, illegal UTF-8 */
+		case 4:
+			ch += *source++;
+			ch <<= 6; /* remember, illegal UTF-8 */
+		case 3:
+			ch += *source++;
+			ch <<= 6;
+		case 2:
+			ch += *source++;
+			ch <<= 6;
+		case 1:
+			ch += *source++;
+			ch <<= 6;
+		case 0:
+			ch += *source++;
+		}
+		ch -= offsetsFromUTF8[extraBytesToRead];
+
+		if (ch <= UNI_MAX_BMP) { /* Target is a character <= 0xFFFF */
+			/* UTF-16 surrogate values are illegal in UTF-32 */
+			if (ch >= UNI_SUR_HIGH_START && ch <= UNI_SUR_LOW_END) {
+				result = sourceIllegal;
+				break;
+			}
+		} else if (ch > UNI_MAX_UTF16) {
+			result = sourceIllegal;
+			break; /* Bail out; shouldn't continue */
+		}
+	}
+	return (result==conversionOK) ? GF_TRUE : GF_FALSE;
+}
 
 GF_EXPORT
 size_t gf_utf8_wcslen (const unsigned short *s)
@@ -585,5 +643,111 @@ bad_input:
 	return (size_t)(-1);
 }
 
+
 #endif
+
+
+GF_EXPORT
+char *gf_utf_get_utf8_string_from_bom(u8 *data, u32 size, char **out_ptr)
+{
+	u32 unicode_type = 0;
+	*out_ptr = NULL;
+
+	if (size>=5) {
+		/*0: no unicode, 1: UTF-16BE, 2: UTF-16LE*/
+		if ((data[0]==0xFF) && (data[1]==0xFE)) {
+			if (!data[2] && !data[3]) {
+				return NULL;
+			} else {
+				unicode_type = 2;
+			}
+		} else if ((data[0]==0xFE) && (data[1]==0xFF)) {
+			if (!data[2] && !data[3]) {
+				return NULL;
+			} else {
+				unicode_type = 1;
+			}
+		} else if ((data[0]==0xEF) && (data[1]==0xBB) && (data[2]==0xBF)) {
+			return data+4;
+		}
+	}
+
+	if (!unicode_type) return data;
+
+	if (size%2) size--;
+	u16 *str_wc = gf_malloc(size+2);
+	u16 *srcwc;
+	char *dst = gf_malloc(size+2);
+	*out_ptr = dst;
+	u32 i;
+	for (i=0; i<size; i+=2) {
+		u16 wchar=0;
+		u8 c1 = data[i];
+		u8 c2 = data[i+1];
+
+		/*Little-endian order*/
+		if (unicode_type==2) {
+			if (c2) {
+				wchar = c2;
+				wchar <<=8;
+				wchar |= c1;
+			}
+			else wchar = c1;
+		} else {
+			wchar = c1;
+			if (c2) {
+				wchar <<= 8;
+				wchar |= c2;
+			}
+		}
+		str_wc[i/2] = wchar;
+	}
+	str_wc[i/2] = 0;
+	srcwc = str_wc;
+	gf_utf8_wcstombs(dst, size, (const unsigned short **) &srcwc);
+	gf_free(str_wc);
+
+	return dst;
+}
+
+
+#if defined(WIN32)
+
+GF_EXPORT
+wchar_t* gf_utf8_to_wcs(const char* str)
+{
+	size_t source_len;
+	wchar_t* result;
+	if (str == 0) return 0;
+	source_len = strlen(str);
+	result = gf_calloc(source_len + 1, sizeof(wchar_t));
+	if (!result)
+		return 0;
+	if (gf_utf8_mbstowcs(result, source_len, &str) == (size_t)-1) {
+		gf_free(result);
+		return 0;
+	}
+	return result;
+}
+
+GF_EXPORT
+char* gf_wcs_to_utf8(const wchar_t* str)
+{
+	size_t source_len;
+	char* result;
+	if (str == 0) return 0;
+	source_len = wcslen(str);
+	result = gf_calloc(source_len + 1, UTF8_MAX_BYTES_PER_CHAR);
+	if (!result)
+		return 0;
+	if (gf_utf8_wcstombs(result, source_len * UTF8_MAX_BYTES_PER_CHAR, &str) < 0) {
+		gf_free(result);
+		return 0;
+	}
+	return result;
+}
+#endif
+
 #endif /* GPAC_DISABLE_CORE_TOOLS */
+
+

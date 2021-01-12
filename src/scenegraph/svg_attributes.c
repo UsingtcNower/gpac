@@ -298,6 +298,7 @@ GF_DOMEventCategory gf_dom_event_get_category(GF_EventType type)
 static const struct predef_keyid {
 	GF_KeyCode key_code;
 	const char *name;
+	const char *friendly_name;
 } predefined_key_identifiers[] =
 {
 	{ GF_KEY_ACCEPT, "Accept" },
@@ -406,78 +407,78 @@ static const struct predef_keyid {
 	{ GF_KEY_VOLUMEUP, "VolumeUp" },
 	{ GF_KEY_WIN, "Win" },
 	{ GF_KEY_ZOOM, "Zoom" },
-	{ GF_KEY_BACKSPACE, "U+0008" },
-	{ GF_KEY_TAB, "U+0009" },
-	{ GF_KEY_CANCEL, "U+0018" },
-	{ GF_KEY_ESCAPE, "U+001B" },
-	{ GF_KEY_SPACE, "U+0020" },
-	{ GF_KEY_EXCLAMATION, "U+0021" },
-	{ GF_KEY_QUOTATION, "U+0022" },
-	{ GF_KEY_NUMBER, "U+0023" },
-	{ GF_KEY_DOLLAR, "U+0024" },
-	{ GF_KEY_AMPERSAND, "U+0026" },
-	{ GF_KEY_APOSTROPHE, "U+0027" },
-	{ GF_KEY_LEFTPARENTHESIS, "U+0028" },
-	{ GF_KEY_RIGHTPARENTHESIS, "U+0029" },
-	{ GF_KEY_STAR, "U+002A" },
-	{ GF_KEY_PLUS, "U+002B" },
-	{ GF_KEY_COMMA, "U+002C" },
-	{ GF_KEY_HYPHEN, "U+002D" },
-	{ GF_KEY_FULLSTOP, "U+002E" },
-	{ GF_KEY_SLASH, "U+002F" },
-	{ GF_KEY_0, "U+0030" },
-	{ GF_KEY_1, "U+0031" },
-	{ GF_KEY_2, "U+0032" },
-	{ GF_KEY_3, "U+0033" },
-	{ GF_KEY_4, "U+0034" },
-	{ GF_KEY_5, "U+0035" },
-	{ GF_KEY_6, "U+0036" },
-	{ GF_KEY_7, "U+0037" },
-	{ GF_KEY_8, "U+0038" },
-	{ GF_KEY_9, "U+0039" },
-	{ GF_KEY_COLON, "U+003A" },
-	{ GF_KEY_SEMICOLON, "U+003B" },
-	{ GF_KEY_LESSTHAN, "U+003C" },
-	{ GF_KEY_EQUALS, "U+003D" },
-	{ GF_KEY_GREATERTHAN, "U+003E" },
-	{ GF_KEY_QUESTION, "U+003F" },
-	{ GF_KEY_AT, "U+0040" },
-	{ GF_KEY_A, "U+0041" },
-	{ GF_KEY_B, "U+0042" },
-	{ GF_KEY_C, "U+0043" },
-	{ GF_KEY_D, "U+0044" },
-	{ GF_KEY_E, "U+0045" },
-	{ GF_KEY_F, "U+0046" },
-	{ GF_KEY_G, "U+0047" },
-	{ GF_KEY_H, "U+0048" },
-	{ GF_KEY_I, "U+0049" },
-	{ GF_KEY_J, "U+004A" },
-	{ GF_KEY_K, "U+004B" },
-	{ GF_KEY_L, "U+004C" },
-	{ GF_KEY_M, "U+004D" },
-	{ GF_KEY_N, "U+004E" },
-	{ GF_KEY_O, "U+004F" },
-	{ GF_KEY_P, "U+0050" },
-	{ GF_KEY_Q, "U+0051" },
-	{ GF_KEY_R, "U+0052" },
-	{ GF_KEY_S, "U+0053" },
-	{ GF_KEY_T, "U+0054" },
-	{ GF_KEY_U, "U+0055" },
-	{ GF_KEY_V, "U+0056" },
-	{ GF_KEY_W, "U+0057" },
-	{ GF_KEY_X, "U+0058" },
-	{ GF_KEY_Y, "U+0059" },
-	{ GF_KEY_Z, "U+005A" },
-	{ GF_KEY_LEFTSQUAREBRACKET, "U+005B" },
-	{ GF_KEY_BACKSLASH, "U+005C" },
-	{ GF_KEY_RIGHTSQUAREBRACKET, "U+005D" },
-	{ GF_KEY_CIRCUM, "U+005E" },
-	{ GF_KEY_UNDERSCORE, "U+005F" },
-	{ GF_KEY_GRAVEACCENT, "U+0060" },
-	{ GF_KEY_LEFTCURLYBRACKET, "U+007B" },
-	{ GF_KEY_PIPE, "U+007C" },
-	{ GF_KEY_RIGHTCURLYBRACKET, "U+007D" },
-	{ GF_KEY_DEL, "U+007F" },
+	{ GF_KEY_BACKSPACE, "U+0008", "backspace" },
+	{ GF_KEY_TAB, "U+0009", "tab" },
+	{ GF_KEY_CANCEL, "U+0018", "cancel" },
+	{ GF_KEY_ESCAPE, "U+001B", "esc" },
+	{ GF_KEY_SPACE, "U+0020", "space" },
+	{ GF_KEY_EXCLAMATION, "U+0021", "!" },
+	{ GF_KEY_QUOTATION, "U+0022", "\"" },
+	{ GF_KEY_NUMBER, "U+0023", "#" },
+	{ GF_KEY_DOLLAR, "U+0024", "$" },
+	{ GF_KEY_AMPERSAND, "U+0026", "&" },
+	{ GF_KEY_APOSTROPHE, "U+0027", "'" },
+	{ GF_KEY_LEFTPARENTHESIS, "U+0028", "(" },
+	{ GF_KEY_RIGHTPARENTHESIS, "U+0029", ")" },
+	{ GF_KEY_STAR, "U+002A", "*" },
+	{ GF_KEY_PLUS, "U+002B", "+" },
+	{ GF_KEY_COMMA, "U+002C", "," },
+	{ GF_KEY_HYPHEN, "U+002D", "-" },
+	{ GF_KEY_FULLSTOP, "U+002E", "." },
+	{ GF_KEY_SLASH, "U+002F", "/" },
+	{ GF_KEY_0, "U+0030", "0" },
+	{ GF_KEY_1, "U+0031", "1" },
+	{ GF_KEY_2, "U+0032", "2" },
+	{ GF_KEY_3, "U+0033", "3" },
+	{ GF_KEY_4, "U+0034", "4" },
+	{ GF_KEY_5, "U+0035", "5" },
+	{ GF_KEY_6, "U+0036", "6" },
+	{ GF_KEY_7, "U+0037", "7" },
+	{ GF_KEY_8, "U+0038", "8" },
+	{ GF_KEY_9, "U+0039", "9" },
+	{ GF_KEY_COLON, "U+003A", ":" },
+	{ GF_KEY_SEMICOLON, "U+003B", ";" },
+	{ GF_KEY_LESSTHAN, "U+003C", "<" },
+	{ GF_KEY_EQUALS, "U+003D", "=" },
+	{ GF_KEY_GREATERTHAN, "U+003E", ">" },
+	{ GF_KEY_QUESTION, "U+003F", "?" },
+	{ GF_KEY_AT, "U+0040", "@" },
+	{ GF_KEY_A, "U+0041", "A" },
+	{ GF_KEY_B, "U+0042", "B" },
+	{ GF_KEY_C, "U+0043", "C" },
+	{ GF_KEY_D, "U+0044", "D" },
+	{ GF_KEY_E, "U+0045", "E" },
+	{ GF_KEY_F, "U+0046", "F" },
+	{ GF_KEY_G, "U+0047", "G" },
+	{ GF_KEY_H, "U+0048", "H" },
+	{ GF_KEY_I, "U+0049", "I" },
+	{ GF_KEY_J, "U+004A", "J" },
+	{ GF_KEY_K, "U+004B", "K" },
+	{ GF_KEY_L, "U+004C", "L" },
+	{ GF_KEY_M, "U+004D", "M" },
+	{ GF_KEY_N, "U+004E", "N" },
+	{ GF_KEY_O, "U+004F", "O" },
+	{ GF_KEY_P, "U+0050", "P" },
+	{ GF_KEY_Q, "U+0051", "Q" },
+	{ GF_KEY_R, "U+0052", "R" },
+	{ GF_KEY_S, "U+0053", "S" },
+	{ GF_KEY_T, "U+0054", "T" },
+	{ GF_KEY_U, "U+0055", "U" },
+	{ GF_KEY_V, "U+0056", "V" },
+	{ GF_KEY_W, "U+0057", "W" },
+	{ GF_KEY_X, "U+0058", "X" },
+	{ GF_KEY_Y, "U+0059", "Y" },
+	{ GF_KEY_Z, "U+005A", "Z" },
+	{ GF_KEY_LEFTSQUAREBRACKET, "U+005B", "[" },
+	{ GF_KEY_BACKSLASH, "U+005C", "\\" },
+	{ GF_KEY_RIGHTSQUAREBRACKET, "U+005D", "]" },
+	{ GF_KEY_CIRCUM, "U+005E", "^" },
+	{ GF_KEY_UNDERSCORE, "U+005F", "_" },
+	{ GF_KEY_GRAVEACCENT, "U+0060", "`" },
+	{ GF_KEY_LEFTCURLYBRACKET, "U+007B", "{" },
+	{ GF_KEY_PIPE, "U+007C", "|" },
+	{ GF_KEY_RIGHTCURLYBRACKET, "U+007D", "}" },
+	{ GF_KEY_DEL, "U+007F", "del" },
 	{ GF_KEY_INVERTEXCLAMATION, "U+00A1" },
 	{ GF_KEY_DEADGRAVE, "U+0300" },
 	{ GF_KEY_DEADEACUTE, "U+0301" },
@@ -493,7 +494,7 @@ static const struct predef_keyid {
 	{ GF_KEY_DEADCEDILLA, "U+0327" },
 	{ GF_KEY_DEADOGONEK, "U+0328" },
 	{ GF_KEY_DEADIOTA, "U+0345" },
-	{ GF_KEY_EURO, "U+20AC" },
+	{ GF_KEY_EURO, "U+20AC"},
 	{ GF_KEY_DEADVOICESOUND, "U+3099" },
 	{ GF_KEY_DEADSEMIVOICESOUND, "U+309A" },
 	{ GF_KEY_CHANNELUP, "ChannelUp" },
@@ -502,7 +503,10 @@ static const struct predef_keyid {
 	{ GF_KEY_INFO, "Info" },
 	{ GF_KEY_EPG, "EPG" },
 	{ GF_KEY_RECORD, "Record" },
-	{ GF_KEY_BEGINPAGE, "BeginPage" }
+	{ GF_KEY_BEGINPAGE, "BeginPage" },
+
+	{ GF_KEY_CELL_SOFT1, "CELLSOFT1" },
+	{ GF_KEY_CELL_SOFT2, "CELLSOFT2" },
 };
 
 
@@ -511,6 +515,15 @@ const char *gf_dom_get_key_name(GF_KeyCode key_identifier)
 {
 	u32 count = sizeof(predefined_key_identifiers) / sizeof(struct predef_keyid);
 	if (!key_identifier || count<= (u32) key_identifier) return "Unknown";
+	return predefined_key_identifiers[key_identifier-1].name;
+}
+GF_EXPORT
+const char *gf_dom_get_friendly_name(GF_KeyCode key_identifier)
+{
+	u32 count = sizeof(predefined_key_identifiers) / sizeof(struct predef_keyid);
+	if (!key_identifier || count<= (u32) key_identifier) return "Unknown";
+	if (predefined_key_identifiers[key_identifier-1].friendly_name)
+		return predefined_key_identifiers[key_identifier-1].friendly_name;
 	return predefined_key_identifiers[key_identifier-1].name;
 }
 
@@ -974,7 +987,7 @@ static GF_Err smil_parse_time(GF_Node *elt, SMIL_Time *v, char *d)
 		u32 hours, minutes;
 		u32 nhours, nminutes;
 		Float seconds;
-		char *tmp1, *tmp2;
+		char *tmp1;
 
 		v->type = GF_SMIL_TIME_WALLCLOCK;
 		tmp += 10;
@@ -985,7 +998,7 @@ static GF_Err smil_parse_time(GF_Node *elt, SMIL_Time *v, char *d)
 			tmp = tmp1;
 		}
 		if ((tmp1 = strchr(tmp, ':')) ) {
-			if ((tmp2 = strchr(tmp1, ':')) ) {
+			if (strchr(tmp1, ':')) {
 				/* HHMMSS */
 				sscanf(tmp, "%u:%u:%f", &hours, &minutes, &seconds);
 			} else {
@@ -1340,7 +1353,7 @@ static GF_Err svg_parse_transform(SVG_Transform *t, char *attribute_content)
 	if ((str = strstr(attribute_content, "ref"))) {
 		t->is_ref = 1;
 		gf_mx2d_init(t->mat);
-		str+=2;
+		str+=3;
 		while (str[i] == ' ') i++;
 		if (str[i] == '(') {
 			i++;
@@ -1351,7 +1364,7 @@ static GF_Err svg_parse_transform(SVG_Transform *t, char *attribute_content)
 				if (str[i] == ',') {
 					i++;
 				} else if (str[i] == ')') {
-					i++;
+					//i++;
 					return GF_OK;
 				}
 				read_chars = svg_parse_number(&(str[i]), &(t->mat.m[2]), 0);
@@ -1370,8 +1383,9 @@ static GF_Err svg_parse_transform(SVG_Transform *t, char *attribute_content)
 				GF_LOG(GF_LOG_ERROR, GF_LOG_PARSER, ("[SVG Parsing] Unsupported syntax for ref transform attribute"));
 			}
 			while (str[i] == ' ') i++;
-			if (str[i] == ')') i++;
-			else {
+			if (str[i] == ')') {
+				//i++;
+			} else {
 				GF_LOG(GF_LOG_ERROR, GF_LOG_PARSER, ("[SVG Parsing] Missing closing parenthesis in transform attribute: %s\n", attribute_content));
 			}
 			return GF_OK;
@@ -1579,7 +1593,18 @@ next_command:
 				end.y += rel_ref_pt.y;
 			}
 #ifndef PARSE_PATH_ONLY
-			gf_path_add_cubic_to(path, ct_orig.x, ct_orig.y, ct_end.x, ct_end.y, end.x, end.y);
+			switch (prev_c) {
+			case 'c':
+			case 'C':
+			case 's':
+			case 'S':
+				gf_path_add_cubic_to(path, ct_orig.x, ct_orig.y, ct_end.x, ct_end.y, end.x, end.y);
+				break;
+			default:
+				gf_path_add_quadratic_to(path, ct_end.x, ct_end.y, end.x, end.y);
+				break;
+			}
+
 #endif
 			rel_ref_pt = end;
 			ct_orig = ct_end;
@@ -1716,6 +1741,7 @@ static void svg_parse_path(SVG_PathData *d_attribute, char *attribute_content)
 		char c, prev_c = 'M';
 #ifdef REMOVE_ALLOC
 		GF_SAFEALLOC(pt, SVG_Point)
+		if (!pt) return;
 #endif
 		i = 0;
 		cur_pt.x = cur_pt.y = 0;
@@ -1731,10 +1757,12 @@ next_command:
 				i++;
 #ifndef REMOVE_ALLOC
 				GF_SAFEALLOC(command, u8)
+				if (!command) return;
 				gf_list_add(d_commands, command);
 				*command = SVG_PATHCOMMAND_M;
 
 				GF_SAFEALLOC(pt, SVG_Point)
+				if (!pt) return;
 				gf_list_add(d_points, pt);
 #endif
 				i += svg_parse_number(&(d[i]), &(pt->x), 0);
@@ -1753,10 +1781,12 @@ next_command:
 				i++;
 #ifndef REMOVE_ALLOC
 				GF_SAFEALLOC(command, u8)
+				if (!command) return;
 				gf_list_add(d_commands, command);
 				*command = SVG_PATHCOMMAND_L;
 
 				GF_SAFEALLOC(pt, SVG_Point)
+				if (!pt) return;
 				gf_list_add(d_points, pt);
 #endif
 				i += svg_parse_number(&(d[i]), &(pt->x), 0);
@@ -1774,10 +1804,12 @@ next_command:
 				i++;
 #ifndef REMOVE_ALLOC
 				GF_SAFEALLOC(command, u8)
+				if (!command) return;
 				gf_list_add(d_commands, command);
 				*command = SVG_PATHCOMMAND_L;
 
 				GF_SAFEALLOC(pt, SVG_Point)
+				if (!pt) return;
 				gf_list_add(d_points, pt);
 #endif
 				i += svg_parse_number(&(d[i]), &(pt->x), 0);
@@ -1793,10 +1825,12 @@ next_command:
 				i++;
 #ifndef REMOVE_ALLOC
 				GF_SAFEALLOC(command, u8)
+				if (!command) return;
 				gf_list_add(d_commands, command);
 				*command = SVG_PATHCOMMAND_L;
 
 				GF_SAFEALLOC(pt, SVG_Point)
+				if (!pt) return;
 				gf_list_add(d_points, pt);
 #endif
 				i += svg_parse_number(&(d[i]), &(pt->y), 0);
@@ -1812,6 +1846,7 @@ next_command:
 				i++;
 #ifndef REMOVE_ALLOC
 				GF_SAFEALLOC(command, u8)
+				if (!command) return;
 				gf_list_add(d_commands, command);
 				*command = SVG_PATHCOMMAND_C;
 #endif
@@ -1819,6 +1854,7 @@ next_command:
 				for (k=0; k<3; k++) {
 #ifndef REMOVE_ALLOC
 					GF_SAFEALLOC(pt, SVG_Point)
+					if (!pt) return;
 					gf_list_add(d_points, pt);
 #endif
 					i += svg_parse_number(&(d[i]), &(pt->x), 0);
@@ -1837,6 +1873,7 @@ next_command:
 				i++;
 #ifndef REMOVE_ALLOC
 				GF_SAFEALLOC(command, u8)
+				if (!command) return;
 				gf_list_add(d_commands, command);
 				*command = SVG_PATHCOMMAND_S;
 #endif
@@ -1844,6 +1881,7 @@ next_command:
 				for (k=0; k<2; k++) {
 #ifndef REMOVE_ALLOC
 					GF_SAFEALLOC(pt, SVG_Point)
+					if (!pt) return;
 					gf_list_add(d_points, pt);
 #endif
 					i += svg_parse_number(&(d[i]), &(pt->x), 0);
@@ -1862,6 +1900,7 @@ next_command:
 				i++;
 #ifndef REMOVE_ALLOC
 				GF_SAFEALLOC(command, u8)
+				if (!command) return;
 				gf_list_add(d_commands, command);
 				*command = SVG_PATHCOMMAND_Q;
 #endif
@@ -1869,6 +1908,7 @@ next_command:
 				for (k=0; k<2; k++) {
 #ifndef REMOVE_ALLOC
 					GF_SAFEALLOC(pt, SVG_Point)
+					if (!pt) return;
 					gf_list_add(d_points, pt);
 #endif
 					i += svg_parse_number(&(d[i]), &(pt->x), 0);
@@ -1887,10 +1927,12 @@ next_command:
 				i++;
 #ifndef REMOVE_ALLOC
 				GF_SAFEALLOC(command, u8)
+				if (!command) return;
 				gf_list_add(d_commands, command);
 				*command = SVG_PATHCOMMAND_T;
 
 				GF_SAFEALLOC(pt, SVG_Point)
+				if (!pt) return;
 				gf_list_add(d_points, pt);
 #endif
 				i += svg_parse_number(&(d[i]), &(pt->x), 0);
@@ -1910,10 +1952,12 @@ next_command:
 				i++;
 #ifndef REMOVE_ALLOC
 				GF_SAFEALLOC(command, u8)
+				if (!command) return;
 				gf_list_add(d_commands, command);
 				*command = SVG_PATHCOMMAND_A;
 
-				GF_SAFEALLOC(pt, SVG_Point)
+				pt = gf_malloc(sizeof(SVG_Point));
+				if (!pt) return;
 				gf_list_add(d_points, pt);
 #endif
 				i += svg_parse_number(&(d[i]), &(pt->x), 0);
@@ -1924,7 +1968,8 @@ next_command:
 				i += svg_parse_number(&(d[i]), &(tmp), 0);
 
 #ifndef REMOVE_ALLOC
-				GF_SAFEALLOC(pt, SVG_Point)
+				pt = gf_malloc(sizeof(SVG_Point));
+				if (!pt) return;
 				gf_list_add(d_points, pt);
 #endif
 				i += svg_parse_number(&(d[i]), &(pt->x), 0);
@@ -1943,6 +1988,7 @@ next_command:
 				i++;
 #ifndef REMOVE_ALLOC
 				GF_SAFEALLOC(command, u8)
+				if (!command) return;
 				gf_list_add(d_commands, command);
 				*command = SVG_PATHCOMMAND_Z;
 #endif
@@ -2434,10 +2480,12 @@ static void smil_parse_time_list(GF_Node *e, GF_List *values, char *begin_or_end
 		if (tmp) len = (u32) (tmp-str);
 		else len = (u32) strlen(str);
 		memcpy(value_string, str, len);
-		while (value_string[len - 1] == ' ' && len > 0) len--;
+		while ((len > 0) && (value_string[len - 1] == ' '))
+			len--;
 		value_string[len] = 0;
 
 		GF_SAFEALLOC(value, SMIL_Time)
+		if (!value) break;
 		gf_list_add(values, value);
 
 		if (smil_parse_time(e, value, value_string) != GF_OK) goto err;
@@ -2450,14 +2498,14 @@ static void smil_parse_time_list(GF_Node *e, GF_List *values, char *begin_or_end
 
 	/* sorting timing values */
 	if (gf_list_count(values) > 1) {
-		SMIL_Time *v, *sv;
+		SMIL_Time *sv;
 		GF_List *sorted = gf_list_new();
 		u32 i, count;
-		u8 added = 0;
 		do {
-			v = (SMIL_Time*)gf_list_get(values, 0);
+			u8 added = 0;
+			SMIL_Time *v = (SMIL_Time*)gf_list_get(values, 0);
 			gf_list_rem(values, 0);
-			added = 0;
+
 			count = gf_list_count(sorted);
 			for (i=0; i<count; i++) {
 				sv = (SMIL_Time*)gf_list_get(sorted, i);
@@ -2684,6 +2732,7 @@ static void svg_parse_coordinates(GF_List *values, char *value_string)
 	while (i < len) {
 		u32 sub;
 		GF_SAFEALLOC(c, SVG_Coordinate)
+		if (!c) break;
 		sub = svg_parse_length(c, &(str[i]), 0);
 		if (!sub) {
 			gf_free(c);
@@ -2728,6 +2777,7 @@ static void svg_parse_points(GF_List *values, char *value_string)
 	while (i < len) {
 		SVG_Point *p;
 		GF_SAFEALLOC(p, SVG_Point)
+		if (!p) break;
 		j = svg_parse_point(p, &str[i]);
 		if (j == 0) {
 			/* cf. http://www.w3.org/TR/SVGMobile12/shapes.html#PolygonElement
@@ -2755,6 +2805,7 @@ static void svg_parse_numbers(GF_List *values, char *value_string, Bool is_angle
 	while (i < len) {
 		Fixed *f;
 		GF_SAFEALLOC(f, Fixed)
+		if (!f) break;
 		read_chars = svg_parse_number(&(str[i]), f, is_angle);
 		if (!read_chars) {
 			gf_free(f);
@@ -2827,6 +2878,7 @@ static void svg_parse_strokedasharray(SVG_StrokeDashArray *value, char *value_st
 		while (i < len) {
 			SVG_Length *f;
 			GF_SAFEALLOC(f, SVG_Length)
+			if (!f) break;
 			read_chars = svg_parse_length(f, &(str[i]), 0);
 			if (!read_chars) {
 				gf_free(f);
@@ -3060,6 +3112,7 @@ GF_Err laser_parse_size(LASeR_Size *size, char *attribute_content)
 	return GF_OK;
 }
 
+GF_EXPORT
 GF_Err gf_svg_parse_element_id(GF_Node *n, const char *nodename, Bool warning_if_defined)
 {
 	GF_SceneGraph *sg = gf_node_get_graph((GF_Node *)n);
@@ -3297,7 +3350,7 @@ GF_Err gf_svg_parse_attribute(GF_Node *n, GF_FieldInfo *info, char *attribute_co
 	case SVG_Transform_Translate_datatype:
 	{
 		u32 i = 0;
-		SVG_Point *p = (SVG_Point *)info->far_ptr;;
+		SVG_Point *p = (SVG_Point *)info->far_ptr;
 		i+=svg_parse_number(&(attribute_content[i]), &(p->x), 0);
 		if (attribute_content[i] == 0) {
 			p->y = 0;
@@ -3309,7 +3362,7 @@ GF_Err gf_svg_parse_attribute(GF_Node *n, GF_FieldInfo *info, char *attribute_co
 	case SVG_Transform_Scale_datatype:
 	{
 		u32 i = 0;
-		SVG_Point *p = (SVG_Point *)info->far_ptr;;
+		SVG_Point *p = (SVG_Point *)info->far_ptr;
 		i+=svg_parse_number(&(attribute_content[i]), &(p->x), 0);
 		if (attribute_content[i] == 0) {
 			p->y = p->x;
@@ -3328,7 +3381,7 @@ GF_Err gf_svg_parse_attribute(GF_Node *n, GF_FieldInfo *info, char *attribute_co
 	case SVG_Transform_Rotate_datatype:
 	{
 		u32 i = 0;
-		SVG_Point_Angle *p = (SVG_Point_Angle *)info->far_ptr;;
+		SVG_Point_Angle *p = (SVG_Point_Angle *)info->far_ptr;
 		i+=svg_parse_number(&(attribute_content[i]), &(p->angle), 1);
 		if (attribute_content[i] == 0) {
 			p->y = p->x = 0;
@@ -3432,6 +3485,7 @@ void svg_parse_one_style(GF_Node *n, char *one_style)
 	one_style[attributeNameLen] = sep;
 }
 
+GF_EXPORT
 void gf_svg_parse_style(GF_Node *n, char *style)
 {
 	u32 i = 0;
@@ -3560,7 +3614,8 @@ void *gf_svg_create_attribute_value(u32 attribute_type)
 	{
 		GF_Matrix2D *p;
 		GF_SAFEALLOC(p, GF_Matrix2D)
-		gf_mx2d_init(*p);
+		if (p)
+			gf_mx2d_init(*p);
 		return p;
 	}
 	break;
@@ -3569,7 +3624,8 @@ void *gf_svg_create_attribute_value(u32 attribute_type)
 	{
 		SVG_Transform *p;
 		GF_SAFEALLOC(p, SVG_Transform)
-		gf_mx2d_init(p->mat);
+		if (p)
+			gf_mx2d_init(p->mat);
 		return p;
 	}
 	break;
@@ -3835,9 +3891,8 @@ static char *svg_dump_iri(XMLRI*iri)
 
 static char *svg_dump_idref(XMLRI*iri)
 {
-	const char *name;
 	if (iri->target) {
-		name = gf_node_get_name((GF_Node *)iri->target);
+		const char *name = gf_node_get_name((GF_Node *)iri->target);
 		if (name) return gf_strdup(name);
 		else {
 			char tmp[50];
@@ -3874,8 +3929,8 @@ static char *svg_dump_path(SVG_PathData *path)
 			} else if (path->tags[i]==GF_PATH_CLOSE) {
 				sprintf(szT, "z");
 			} else {
-				if (i && (last_pt.x==pt->x)) sprintf(szT, "V%g", _FIX2FLT(pt->y));
-				else if (i && (last_pt.y==pt->y)) sprintf(szT, "H%g", _FIX2FLT(pt->x));
+				if (last_pt.x==pt->x) sprintf(szT, "V%g", _FIX2FLT(pt->y));
+				else if (last_pt.y==pt->y) sprintf(szT, "H%g", _FIX2FLT(pt->x));
 				else sprintf(szT, "L%g %g", _FIX2FLT(pt->x), _FIX2FLT(pt->y));
 			}
 			last_pt = *pt;
@@ -4105,10 +4160,10 @@ char *gf_svg_dump_attribute(GF_Node *elt, GF_FieldInfo *info)
 		if (paint->type == SVG_PAINT_NONE) return gf_strdup("none");
 		else if (paint->type == SVG_PAINT_INHERIT) return gf_strdup("inherit");
 		else if (paint->type == SVG_PAINT_URI) {
-			char *tmp = svg_dump_iri(&paint->iri);
-			char *res = gf_malloc(sizeof(char)*(strlen(tmp)+6));
-			sprintf(res, "url(%s)", tmp);
-			gf_free(tmp);
+			char *iritmp = svg_dump_iri(&paint->iri);
+			char *res = gf_malloc(sizeof(char)*(strlen(iritmp)+6));
+			sprintf(res, "url(%s)", iritmp);
+			gf_free(iritmp);
 			return res;
 		} else {
 			return svg_dump_color(&paint->color);
@@ -4846,7 +4901,7 @@ char *gf_svg_dump_attribute_indexed(GF_Node *elt, GF_FieldInfo *info)
 	case SVG_Points_datatype:
 	{
 #if DUMP_COORDINATES
-		SVG_Point *p = (SVG_Point *)info->far_ptr;
+		SVG_Point *p = (SVG_Point *)gf_list_get(*(GF_List **)info->far_ptr, 0);
 		sprintf(tmp, "%g %g", _FIX2FLT(p->x), _FIX2FLT(p->y));
 		return gf_strdup(tmp);
 #endif
@@ -4856,7 +4911,7 @@ char *gf_svg_dump_attribute_indexed(GF_Node *elt, GF_FieldInfo *info)
 	case SMIL_KeyTimes_datatype:
 	case SMIL_KeySplines_datatype:
 	{
-		Fixed *p = (Fixed *)info->far_ptr;
+		Fixed *p = (Fixed *)gf_list_get(*(GF_List **)info->far_ptr, 0);
 		sprintf(tmp, "%g", _FIX2FLT(*p));
 		return gf_strdup(tmp);
 	}
@@ -4883,7 +4938,7 @@ char *gf_svg_dump_attribute_indexed(GF_Node *elt, GF_FieldInfo *info)
 	break;
 	case SMIL_Times_datatype:
 	{
-		SMIL_Time *t = (SMIL_Time *)info->far_ptr;
+		SMIL_Time *t = (SMIL_Time *)gf_list_get(*(GF_List **)info->far_ptr, 0);
 		if (t->type == GF_SMIL_TIME_CLOCK) {
 			sprintf(tmp, "%gs", t->clock);
 		} else if (t->type==GF_SMIL_TIME_INDEFINITE) {
@@ -5086,9 +5141,9 @@ Bool gf_svg_attributes_equal(GF_FieldInfo *f1, GF_FieldInfo *f2)
 	{
 		SVG_PathData *d1 = (SVG_PathData *)f1->far_ptr;
 		SVG_PathData *d2 = (SVG_PathData *)f2->far_ptr;
+#if USE_GF_PATH
 		u32 i;
 		/*FIXME - be less lazy..*/
-#if USE_GF_PATH
 		if (d1->n_points != d2->n_points) return 0;
 		if (d1->n_contours != d2->n_contours) return 0;
 		for (i=0; i<d1->n_points; i++) {
@@ -5154,9 +5209,9 @@ Bool gf_svg_attributes_equal(GF_FieldInfo *f1, GF_FieldInfo *f2)
 	}
 	case SVG_ViewBox_datatype:
 	{
-		SVG_ViewBox *v1 = (SVG_ViewBox *)f1->far_ptr;
-		SVG_ViewBox *v2 = (SVG_ViewBox *)f2->far_ptr;
-		return svg_viewbox_equal(v1, v2);
+		SVG_ViewBox *vb1 = (SVG_ViewBox *)f1->far_ptr;
+		SVG_ViewBox *vb2 = (SVG_ViewBox *)f2->far_ptr;
+		return svg_viewbox_equal(vb1, vb2);
 	}
 	case SVG_StrokeDashArray_datatype:
 	{
@@ -5443,6 +5498,7 @@ static GF_Err svg_points_muladd(Fixed alpha, SVG_Points *a, Fixed beta, SVG_Poin
 		SVG_Point *pta = (SVG_Point *)gf_list_get(*a, i);
 		SVG_Point *ptb = (SVG_Point *)gf_list_get(*b, i);
 		GF_SAFEALLOC(ptc, SVG_Point)
+		if (!ptc) break;
 		svg_point_muladd(alpha, pta, beta, ptb, ptc);
 		gf_list_add(*c, ptc);
 	}
@@ -5466,10 +5522,7 @@ static GF_Err svg_points_copy(SVG_Points *a, SVG_Points *b)
 		SVG_Point *ptb = (SVG_Point *)gf_list_get(*b, i);
 		SVG_Point *pta;
 		GF_SAFEALLOC(pta, SVG_Point)
-		if (!pta) {
-			GF_LOG(GF_LOG_ERROR, GF_LOG_PARSER, ("[SVG Parsing] Cannot allocate SVG point\n"));
-			continue;
-		}
+		if (!pta) return GF_OUT_OF_MEM;
 		*pta = *ptb;
 		gf_list_add(*a, pta);
 	}
@@ -5490,6 +5543,7 @@ static GF_Err svg_numbers_muladd(Fixed alpha, SVG_Numbers *a, Fixed beta, SVG_Nu
 		SVG_Number *na = (SVG_Number *)gf_list_get(*a, i);
 		SVG_Number *nb = (SVG_Number *)gf_list_get(*b, i);
 		GF_SAFEALLOC(nc, SVG_Number)
+		if (!nc) return GF_OUT_OF_MEM;
 		svg_number_muladd(alpha, na, beta, nb, nc);
 		gf_list_add(*c, nc);
 	}
@@ -5511,10 +5565,7 @@ static GF_Err svg_numbers_copy(SVG_Numbers *a, SVG_Numbers *b)
 	for (i = 0; i < count; i ++) {
 		SVG_Number *na;
 		GF_SAFEALLOC(na, SVG_Number)
-		if (!na) {
-			GF_LOG(GF_LOG_ERROR, GF_LOG_PARSER, ("[SVG Parsing] Cannot allocate SVG number\n"));
-			continue;
-		}
+		if (!na) return GF_OUT_OF_MEM;
 		*na = *(SVG_Number *)gf_list_get(*b, i);
 		gf_list_add(*a, na);
 	}
@@ -5568,6 +5619,7 @@ static GF_Err svg_path_copy(SVG_PathData *a, SVG_PathData *b)
 	for (i = 0; i < count; i ++) {
 		SVG_Point *pta;
 		GF_SAFEALLOC(pta, SVG_Point)
+		if (!pta) break;
 		*pta = *(SVG_Point *)gf_list_get(b->points, i);
 		gf_list_add(a->points, pta);
 	}
@@ -5631,6 +5683,7 @@ static GF_Err svg_path_muladd(Fixed alpha, SVG_PathData *a, Fixed beta, SVG_Path
 		SVG_Point *ptb = (SVG_Point *)gf_list_get(b->points, i);
 		SVG_Point *ptc;
 		GF_SAFEALLOC(ptc, SVG_Point)
+		if (!ptc) break;
 		svg_point_muladd(alpha, pta, beta, ptb, ptc);
 		gf_list_add(c->points, ptc);
 	}
@@ -5661,9 +5714,11 @@ static GF_Err svg_dasharray_copy(SVG_StrokeDashArray *a, SVG_StrokeDashArray *b)
 	a->type = b->type;
 	a->array.count = b->array.count;
 	a->array.units = (u8*)gf_malloc(sizeof(u8)*a->array.count);
-	memcpy(a->array.units, b->array.units, sizeof(u8)*a->array.count);
+	if (a->array.count)
+		memcpy(a->array.units, b->array.units, sizeof(u8)*a->array.count);
 	a->array.vals = (Fixed*)gf_malloc(sizeof(Fixed)*a->array.count);
-	memcpy(a->array.vals, b->array.vals, sizeof(Fixed)*a->array.count);
+	if (a->array.count)
+		memcpy(a->array.vals, b->array.vals, sizeof(Fixed)*a->array.count);
 	return GF_OK;
 }
 
@@ -6356,9 +6411,7 @@ Bool gf_svg_is_current_color(GF_FieldInfo *a)
 	return 0;
 }
 
-
-
-char *gf_svg_attribute_type_to_string(u32 att_type)
+const char *gf_svg_attribute_type_to_string(u32 att_type)
 {
 	switch (att_type) {
 	case SVG_FillRule_datatype:
