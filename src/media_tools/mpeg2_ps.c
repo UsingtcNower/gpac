@@ -139,7 +139,7 @@ struct mpeg2ps_ {
 };
 
 /*************************************************************************
- * File access routines.  Could all be inlined
+ * File access routines.  Could all be inline
  *************************************************************************/
 static FILE *file_open (const char *name)
 {
@@ -160,7 +160,7 @@ static Bool file_read_bytes(FILE *fd,
                             u8 *buffer,
                             u32 len)
 {
-	u32 readval = (u32) fread(buffer, 1, len, fd);
+	u32 readval = (u32) gf_fread(buffer, len, fd);
 	return readval == len;
 }
 
@@ -175,11 +175,7 @@ static void file_skip_bytes (FILE *fd, s32 len)
 
 static u64 file_size(FILE *fd)
 {
-	u64 ret;
-	gf_fseek(fd, 0, SEEK_END);
-	ret = gf_ftell(fd);
-	gf_fseek(fd, 0, SEEK_SET);
-	return ret;
+	return gf_fsize(fd);
 }
 
 static mpeg2ps_record_pes_t *create_record (s64 loc, u64 ts)
@@ -270,10 +266,12 @@ int MPEG12_ParseSeqHdr(unsigned char *pbuffer, u32 buflen, s32 *have_mpeg2, u32 
 	u32 scode, ix;
 	s32 found = -1;
 	*have_mpeg2 = 0;
+	if (buflen<6) return found;
+
 	buflen -= 6;
 	bitrate_int = 0;
 	for (ix = 0; ix < buflen; ix++, pbuffer++) {
-		scode = (pbuffer[0] << 24) | (pbuffer[1] << 16) | (pbuffer[2] << 8) |
+		scode = ((u32)pbuffer[0] << 24) | (pbuffer[1] << 16) | (pbuffer[2] << 8) |
 		        pbuffer[3];
 
 		if (scode == MPEG12_SEQUENCE_START_CODE) {
@@ -359,17 +357,19 @@ s32 MPEG12_PictHdrType (unsigned char *pbuffer)
 	return ((pbuffer[1] >> 3) & 0x7);
 }
 
+#if 0 //unused
 u16 MPEG12_PictHdrTempRef(unsigned char *pbuffer)
 {
 	pbuffer += sizeof(u32);
 	return ((pbuffer[0] << 2) | ((pbuffer[1] >> 6) & 0x3));
 }
+#endif
 
 
 static u64 read_pts (u8 *pak)
 {
-	u64 pts;
-	u16 temp;
+	u64 pts=0;
+	u16 temp=0;
 
 	pts = ((pak[0] >> 1) & 0x7);
 	pts <<= 15;
@@ -421,8 +421,8 @@ static void adv_past_pack_hdr (FILE *fd,
                                u8 *pak,
                                u32 read_from_start)
 {
-	u8 stuffed;
-	u8 readbyte;
+	u8 stuffed=0;
+	u8 readbyte=0;
 	u8 val;
 	if (read_from_start < 5) {
 		file_skip_bytes(fd, 5 - read_from_start);
@@ -441,7 +441,8 @@ static void adv_past_pack_hdr (FILE *fd,
 	file_skip_bytes(fd, 13 - read_from_start);
 	file_read_bytes(fd, &readbyte, 1);
 	stuffed = readbyte & 0x7;
-	file_skip_bytes(fd, stuffed);
+	if (stuffed)
+		file_skip_bytes(fd, stuffed);
 }
 
 /*
@@ -517,19 +518,14 @@ static void copy_bytes_to_pes_buffer (mpeg2ps_stream_t *sptr,
 		        to_move);
 		sptr->pes_buffer_size = to_move;
 		sptr->pes_buffer_on = 0;
-		//fprintf(stderr, "moving %d bytes\n", to_move);
 		if (to_move + pes_len > sptr->pes_buffer_size_max) {
 			sptr->pes_buffer = (u8 *)gf_realloc(sptr->pes_buffer,
 			                                    to_move + pes_len + 2048);
 			sptr->pes_buffer_size_max = to_move + pes_len + 2048;
 		}
 	}
-	file_read_bytes(sptr->m_fd, sptr->pes_buffer + sptr->pes_buffer_size, pes_len);
-	sptr->pes_buffer_size += pes_len;
-#if 0
-	fprintf(stderr, "copying %u bytes - on %u size %u\n",
-	        pes_len, sptr->pes_buffer_on, sptr->pes_buffer_size);
-#endif
+	u32 size_read = (u32) gf_fread(sptr->pes_buffer + sptr->pes_buffer_size, pes_len, sptr->m_fd);
+	sptr->pes_buffer_size += size_read;
 }
 
 /*
@@ -575,11 +571,6 @@ static Bool read_to_next_pes_header (FILE *fd,
 		// we should have a valid stream and pes_len here...
 		*stream_id = hdr & 0xff;
 		*pes_len = convert16(local + 4);
-#if 0
-		fprintf(stderr, "loc: "X64" %x len %u\n", file_location(fd) - 6,
-		        local[3],
-		        *pes_len);
-#endif
 		return 1;
 	}
 	return 0;
@@ -597,12 +588,12 @@ static Bool read_pes_header_data (FILE *fd,
                                   mpeg2ps_ts_t *ts)
 {
 	u16 pes_len = orig_pes_len;
-	u8 local[10];
+	u8 local[10] = {0};
 	u32 hdr_len;
 
 	ts->have_pts = 0;
 	ts->have_dts = 0;
-	*have_ts = 0;
+	if (have_ts) *have_ts = 0;
 	if (file_read_bytes(fd, local, 1) == 0) {
 		return 0;
 	}
@@ -633,7 +624,6 @@ static Bool read_pes_header_data (FILE *fd,
 		}
 		ts->have_pts = 1;
 		ts->pts = ts->dts = read_pts(local);
-		//fprintf(stderr, "mpeg1 pts "U64"\n", ts->pts);
 		*have_ts = 1;
 		pes_len -= 4;
 	} else if ((*local & 0xf0) == 0x30) {
@@ -817,9 +807,6 @@ mpeg2ps_stream_find_mpeg_video_frame (mpeg2ps_stream_t *sptr)
 		// clear timestamp indication
 		sptr->next_pes_ts.have_pts = sptr->next_pes_ts.have_dts = 0;
 	}
-#if 0
-	fprintf(stderr, "header %x at %d\n", scode, sptr->pes_buffer_on);
-#endif
 
 	if (scode == MPEG12_PICTURE_START_CODE) {
 		sptr->pict_header_offset = sptr->pes_buffer_on;
@@ -842,10 +829,6 @@ mpeg2ps_stream_find_mpeg_video_frame (mpeg2ps_stream_t *sptr)
 			start += sptr->pes_buffer_on;
 			sptr->pict_header_offset += sptr->pes_buffer_on;
 		} else {
-#if 0
-			fprintf(stderr, "2header %x at %d\n", scode, start);
-#endif
-
 			start += offset;
 			if (have_pict == 0) {
 				if (scode == MPEG12_PICTURE_START_CODE) {
@@ -870,8 +853,8 @@ static Bool mpeg2ps_stream_find_ac3_frame (mpeg2ps_stream_t *sptr)
 {
 	u32 diff;
 	Bool started_new_pes = 0;
-	GF_AC3Header hdr;
-	memset(&hdr, 0, sizeof(GF_AC3Header));
+	GF_AC3Config hdr;
+	memset(&hdr, 0, sizeof(GF_AC3Config));
 	sptr->frame_ts = sptr->next_pes_ts; // set timestamp after searching
 	if (sptr->pes_buffer_size <= sptr->pes_buffer_on + 6) {
 		if (sptr->pes_buffer_size != sptr->pes_buffer_on)
@@ -904,12 +887,6 @@ static Bool mpeg2ps_stream_find_ac3_frame (mpeg2ps_stream_t *sptr)
 		sptr->next_pes_ts.have_dts = sptr->next_pes_ts.have_pts = 0;
 	}
 	while (sptr->pes_buffer_size - sptr->pes_buffer_on < sptr->frame_len) {
-#if 0
-		fprintf(stderr, "don't have enough - on %u size %u %u %u\n", sptr->pes_buffer_on,
-		        sptr->pes_buffer_size,
-		        sptr->pes_buffer_size - sptr->pes_buffer_on,
-		        sptr->frame_len);
-#endif
 		if (mpeg2ps_stream_read_next_pes_buffer(sptr) == 0) {
 			return 0;
 		}
@@ -931,7 +908,7 @@ static Bool mpeg2ps_stream_find_mp3_frame (mpeg2ps_stream_t *sptr)
 			return 0;
 		}
 	}
-	while ((hdr=gf_mp3_get_next_header_mem((char*)sptr->pes_buffer + sptr->pes_buffer_on,
+	while ((hdr=gf_mp3_get_next_header_mem(sptr->pes_buffer + sptr->pes_buffer_on,
 	                                       sptr->pes_buffer_size - sptr->pes_buffer_on,
 	                                       &diff) ) == 0) {
 		// don't have frame
@@ -957,12 +934,6 @@ static Bool mpeg2ps_stream_find_mp3_frame (mpeg2ps_stream_t *sptr)
 		sptr->next_pes_ts.have_dts = sptr->next_pes_ts.have_pts = 0;
 	}
 	while (sptr->pes_buffer_size - sptr->pes_buffer_on < sptr->frame_len) {
-#if 0
-		fprintf(stderr, "don't have enough - on %u size %u %u %u\n", sptr->pes_buffer_on,
-		        sptr->pes_buffer_size,
-		        sptr->pes_buffer_size - sptr->pes_buffer_on,
-		        sptr->frame_len);
-#endif
 		if (mpeg2ps_stream_read_next_pes_buffer(sptr) == 0) {
 			return 0;
 		}
@@ -1028,14 +999,15 @@ static void get_info_from_frame (mpeg2ps_stream_t *sptr,
 		                       &sptr->par) < 0) {
 			sptr->m_stream_id = 0;
 			sptr->m_fd = FDNULL;
+			return;
 		}
-		sptr->ticks_per_frame = (u64)(90000.0 / sptr->frame_rate);
+		sptr->ticks_per_frame = GF_FLOAT_TO_U64(90000.0 / sptr->frame_rate);
 		return;
 	}
 
 	if (sptr->m_stream_id >= 0xc0) {
 		// mpeg audio
-		u32 hdr = GF_4CC(buffer[0],buffer[1],buffer[2],buffer[3]);
+		u32 hdr = GF_4CC((u32)buffer[0],buffer[1],buffer[2],buffer[3]);
 
 		sptr->channels = gf_mp3_num_channels(hdr);
 		sptr->freq = gf_mp3_sampling_rate(hdr);
@@ -1047,12 +1019,12 @@ static void get_info_from_frame (mpeg2ps_stream_t *sptr,
 			// PCM - ???
 		} else if (sptr->m_substream_id >= 0x80) {
 			u32 pos;
-			GF_AC3Header hdr;
-			memset(&hdr, 0, sizeof(GF_AC3Header));
+			GF_AC3Config hdr;
+			memset(&hdr, 0, sizeof(GF_AC3Config));
 			gf_ac3_parser(buffer, buflen, &pos, &hdr, 0);
-			sptr->bitrate = hdr.bitrate;
+			sptr->bitrate = gf_ac3_get_bitrate(hdr.brcode);
 			sptr->freq = hdr.sample_rate;
-			sptr->channels = hdr.channels;
+			sptr->channels = hdr.streams[0].channels;
 			sptr->samples_per_frame = 256 * 6;
 		} else {
 			return;
@@ -1090,7 +1062,7 @@ static u64 convert_ts (mpeg2ps_stream_t *sptr,
 	if (sptr->is_video) {
 		// video
 		ret += frames_since_ts * sptr->ticks_per_frame;
-	} else {
+	} else if (sptr->freq) {
 		// audio
 		calc = (frames_since_ts * 90000 * sptr->samples_per_frame) / sptr->freq;
 		ret += calc;
@@ -1103,7 +1075,7 @@ static u64 convert_ts (mpeg2ps_stream_t *sptr,
 
 /*
  * find_stream_from_id - given the stream, get the sptr.
- * only used in inital set up, really.  APIs use index into
+ * only used in initial set up, really.  APIs use index into
  * video_streams and audio_streams arrays.
  */
 static mpeg2ps_stream_t *find_stream_from_id (mpeg2ps_t *ps,
@@ -1220,7 +1192,7 @@ static void get_info_for_all_streams (mpeg2ps_t *ps)
 			if (av == 0) sptr = ps->video_streams[stream_ix];
 			else sptr = ps->audio_streams[stream_ix];
 
-			// we don't open a seperate file descriptor yet (only when they
+			// we don't open a separate file descriptor yet (only when they
 			// start reading or seeking).  Use the one from the ps.
 			sptr->m_fd = ps->fd; // for now
 			clear_stream_buffer(sptr);
@@ -1234,7 +1206,7 @@ static void get_info_for_all_streams (mpeg2ps_t *ps)
 			}
 			get_info_from_frame(sptr, buffer, buflen);
 			// here - if (sptr->first_pes_has_dts == 0) should be processed
-			if (sptr->first_pes_has_dts == 0) {
+			if ((sptr->first_pes_has_dts == 0) && sptr->m_fd) {
 				u32 frames_from_beg = 0;
 				Bool have_frame;
 				do {
@@ -1255,9 +1227,11 @@ static void get_info_for_all_streams (mpeg2ps_t *ps)
 					if (sptr->is_video) {
 						sptr->start_dts -= frames_from_beg * sptr->ticks_per_frame;
 					} else {
-						u64 conv;
-						conv = sptr->samples_per_frame * 90000;
-						conv /= (u64)sptr->freq;
+						u64 conv = (u64) -1;
+						if ((u64)sptr->freq) {
+							conv = sptr->samples_per_frame * 90000;
+							conv /= (u64)sptr->freq;
+						}
 						sptr->start_dts -= conv;
 					}
 				}
@@ -1277,6 +1251,7 @@ static void mpeg2ps_scan_file (mpeg2ps_t *ps)
 	u8 stream_id, stream_ix, substream, av_ix, max_cnt;
 	u16 pes_len, pes_left;
 	mpeg2ps_ts_t ts;
+	memset(&ts, 0, sizeof(mpeg2ps_ts_t));
 	s64 loc, first_video_loc = 0, first_audio_loc = 0;
 	s64 check, orig_check;
 	mpeg2ps_stream_t *sptr;
@@ -1317,8 +1292,7 @@ static void mpeg2ps_scan_file (mpeg2ps_t *ps)
 				        (substream >= 0xa0 && substream < 0xb0)) {
 					valid_stream = 1;
 				}
-			} else if (stream_id >= 0xc0 &&
-			           stream_id <= 0xef) {
+			} else if (stream_id >= 0xc0) {
 				// audio and video
 				valid_stream = 1;
 			}
@@ -1356,7 +1330,6 @@ static void mpeg2ps_scan_file (mpeg2ps_t *ps)
 	 * Now, we go to close to the end, and try to find the last
 	 * dts that we can
 	 */
-	//  fprintf(stderr, "to end "X64"\n", end - orig_check);
 	file_seek_to(ps->fd, ps->end_loc - orig_check);
 
 	while (read_to_next_pes_header(ps->fd, &stream_id, &pes_len)) {
@@ -1391,12 +1364,6 @@ static void mpeg2ps_scan_file (mpeg2ps_t *ps)
 				sptr->end_dts = ts.have_dts ? ts.dts : ts.pts;
 				sptr->end_dts_loc = loc;
 			}
-#if 0
-			fprintf(stderr, "loc "X64" stream %x %x", loc, stream_id, substream);
-			if (ts.have_pts) fprintf(stderr, " pts "U64, ts.pts);
-			if (ts.have_dts) fprintf(stderr, " dts "U64, ts.dts);
-			fprintf(stderr, "\n");
-#endif
 			file_skip_bytes(ps->fd, pes_left);
 		}
 	}
@@ -1439,7 +1406,7 @@ static void mpeg2ps_scan_file (mpeg2ps_t *ps)
 			       ps->audio_streams[stream_ix];
 
 			// pick up here - find the final time...
-			if (sptr->end_dts_loc != 0) {
+			if (sptr && (sptr->end_dts_loc != 0)) {
 				file_seek_to(ps->fd, sptr->end_dts_loc);
 				sptr->m_fd = ps->fd;
 				frame_cnt_since_last = 0;
@@ -1489,6 +1456,7 @@ static Bool invalid_video_streamno (mpeg2ps_t *ps, u32 streamno)
 	return 0;
 }
 
+#if 0 //unused
 const char *mpeg2ps_get_video_stream_name (mpeg2ps_t *ps, u32 streamno)
 {
 	if (invalid_video_streamno(ps, streamno)) {
@@ -1499,6 +1467,7 @@ const char *mpeg2ps_get_video_stream_name (mpeg2ps_t *ps, u32 streamno)
 	}
 	return "Mpeg-1";
 }
+#endif
 
 mpeg2ps_video_type_t mpeg2ps_get_video_stream_type (mpeg2ps_t *ps,
         u32 streamno)
@@ -1549,6 +1518,14 @@ Double mpeg2ps_get_video_stream_framerate (mpeg2ps_t *ps, u32 streamno)
 	return ps->video_streams[streamno]->frame_rate;
 }
 
+u32 mpeg2ps_get_video_stream_id(mpeg2ps_t *ps, u32 streamno)
+{
+	if (invalid_video_streamno(ps, streamno)) {
+		return 0;
+	}
+	return ps->video_streams[streamno]->m_stream_id;
+}
+
 static Bool invalid_audio_streamno (mpeg2ps_t *ps, u32 streamno)
 {
 	if (streamno >= NUM_ELEMENTS_IN_ARRAY(ps->audio_streams)) return 1;
@@ -1561,6 +1538,7 @@ u32 mpeg2ps_get_audio_stream_count (mpeg2ps_t *ps)
 	return ps->audio_cnt;
 }
 
+#if 0 //unused
 const char *mpeg2ps_get_audio_stream_name (mpeg2ps_t *ps,
         u32 streamno)
 {
@@ -1584,6 +1562,7 @@ const char *mpeg2ps_get_audio_stream_name (mpeg2ps_t *ps,
 
 	return "LPCM";
 }
+#endif
 
 mpeg2ps_audio_type_t mpeg2ps_get_audio_stream_type (mpeg2ps_t *ps,
         u32 streamno)
@@ -1624,6 +1603,15 @@ u32 mpeg2ps_get_audio_stream_bitrate (mpeg2ps_t *ps, u32 streamno)
 	}
 	return ps->audio_streams[streamno]->bitrate;
 }
+
+u32 mpeg2ps_get_audio_stream_id (mpeg2ps_t *ps, u32 streamno)
+{
+	if (invalid_audio_streamno(ps, streamno)) {
+		return 0;
+	}
+	return ps->audio_streams[streamno]->m_stream_id;
+}
+
 
 mpeg2ps_t *mpeg2ps_init (const char *filename)
 {
@@ -1710,8 +1698,9 @@ Bool mpeg2ps_get_video_frame(mpeg2ps_t *ps, u32 streamno,
                              u32 *buflen,
                              u8 *frame_type,
                              mpeg2ps_ts_type_t ts_type,
-                             u64 *timestamp)
+                             u64 *decode_timestamp, u64 *compose_timestamp)
 {
+	u64 dts, cts;
 	mpeg2ps_stream_t *sptr;
 	if (invalid_video_streamno(ps, streamno)) return 0;
 
@@ -1733,14 +1722,22 @@ Bool mpeg2ps_get_video_frame(mpeg2ps_t *ps, u32 streamno,
 		                                 sptr->pict_header_offset);
 	}
 
-	// and the timestamp
-	if (timestamp != NULL) {
-		*timestamp = stream_convert_frame_ts_to_msec(sptr, ts_type,
-		             ps->first_dts, NULL);
-	}
+	// set the timestamps
+	if (sptr->frame_ts.have_pts)
+		cts = sptr->frame_ts.pts;
+	else
+		cts = sptr->last_ts + (1+sptr->frames_since_last_ts) * sptr->ticks_per_frame;
+	if (sptr->frame_ts.have_dts)
+		dts = sptr->frame_ts.dts;
+	else
+		dts = cts;
 
-	// finally, indicate that we read this frame - get ready for the next one.
+	if (decode_timestamp) *decode_timestamp = dts;
+	if (compose_timestamp) *compose_timestamp = cts;
+
+	//indicate that we read this frame - get ready for the next one.
 	advance_frame(sptr);
+
 
 	return 1;
 }
@@ -1755,7 +1752,6 @@ Bool mpeg2ps_get_audio_frame(mpeg2ps_t *ps, u32 streamno,
                              u64 *timestamp)
 {
 	mpeg2ps_stream_t *sptr;
-	u64 ts;
 	if (invalid_audio_streamno(ps, streamno)) return 0;
 
 	sptr = ps->audio_streams[streamno];
@@ -1766,20 +1762,20 @@ Bool mpeg2ps_get_audio_frame(mpeg2ps_t *ps, u32 streamno,
 			return 0;
 	}
 
-	if (timestamp != NULL || freq_timestamp != NULL) {
-		ts = stream_convert_frame_ts_to_msec(sptr,
+	if (freq_timestamp) {
+		/*ts = */stream_convert_frame_ts_to_msec(sptr,
 		                                     ts_type,
 		                                     ps->first_dts,
 		                                     freq_timestamp);
-		if (timestamp != NULL) {
-			*timestamp = ts;
-		}
 	}
-
+	if (timestamp != NULL) {
+		*timestamp = sptr->frame_ts.have_pts ? sptr->frame_ts.pts : sptr->frame_ts.dts;
+	}
 	advance_frame(sptr);
 	return 1;
 }
 
+#if 0 //unused
 u64 mpeg2ps_get_ps_size(mpeg2ps_t *ps)
 {
 	return file_size(ps->fd);
@@ -1794,5 +1790,257 @@ s64 mpeg2ps_get_audio_pos(mpeg2ps_t *ps, u32 streamno)
 	if (invalid_audio_streamno(ps, streamno)) return 0;
 	return gf_ftell(ps->audio_streams[streamno]->m_fd);
 }
+#endif
+
+
+/***************************************************************************
+ * seek routines
+ ***************************************************************************/
+/*
+ * mpeg2ps_binary_seek - look for a pts that's close to the one that
+ * we're looking for.  We have a start ts and location, an end ts and
+ * location, and what we're looking for
+ */
+static void mpeg2ps_binary_seek (mpeg2ps_t *ps,
+				 mpeg2ps_stream_t *sptr,
+				 u64 search_dts,
+				 u64 start_dts,
+				 u64 start_loc,
+				 u64 end_dts,
+				u64 end_loc)
+{
+  u64 dts_perc;
+  u64 loc;
+  u16 pes_len;
+  Bool have_ts = GF_FALSE;
+  u64 found_loc;
+  u64 found_dts;
+
+  while (1) {
+    /*
+     * It's not a binary search as much as using a percentage between
+     * the start and end dts to start.  We subtract off a bit, so we
+     * approach from the beginning of the file - we're more likely to
+     * hit a pts that way
+     */
+    dts_perc = (search_dts - start_dts) * 1000 / (end_dts - start_dts);
+    dts_perc -= dts_perc % 10;
+
+    loc = ((end_loc - start_loc) * dts_perc) / 1000;
+
+    if (loc == start_loc || loc == end_loc) return;
+
+    clear_stream_buffer(sptr);
+    file_seek_to(sptr->m_fd, start_loc + loc);
+
+    // we'll look for the next pes header for this stream that has a ts.
+    do {
+      if (search_for_next_pes_header(sptr,
+				     &pes_len,
+				     &have_ts,
+				     &found_loc) == GF_FALSE) {
+	return;
+      }
+      if (have_ts == GF_FALSE) {
+	file_skip_bytes(sptr->m_fd, pes_len);
+      }
+    } while (have_ts == GF_FALSE);
+
+    // record that spot...
+    mpeg2ps_record_pts(sptr, found_loc, &sptr->next_pes_ts);
+
+    found_dts = sptr->next_pes_ts.have_dts ?
+      sptr->next_pes_ts.dts : sptr->next_pes_ts.pts;
+    /*
+     * Now, if we're before the search ts, and within 5 seconds,
+     * we'll say we're close enough
+     */
+    if (found_dts + (5 * 90000) > search_dts &&
+	found_dts < search_dts) {
+      file_seek_to(sptr->m_fd, found_loc);
+      return; // found it - we can seek from here
+    }
+    /*
+     * otherwise, move the head or the tail (most likely the head).
+     */
+    if (found_dts > search_dts) {
+      if (found_dts >= end_dts) {
+	file_seek_to(sptr->m_fd, found_loc);
+	return;
+      }
+      end_loc = found_loc;
+      end_dts = found_dts;
+    } else {
+      if (found_dts <= start_dts) {
+	file_seek_to(sptr->m_fd, found_loc);
+	return;
+      }
+      start_loc = found_loc;
+      start_dts = found_dts;
+    }
+  }
+}
+
+
+
+static mpeg2ps_record_pes_t *search_for_ts (mpeg2ps_stream_t *sptr,
+				     u64 dts)
+{
+  mpeg2ps_record_pes_t *p, *q;
+  u64 p_diff, q_diff;
+  if (sptr->record_last == NULL) return NULL;
+
+  if (dts > sptr->record_last->dts) return sptr->record_last;
+
+  if (dts < sptr->record_first->dts) return NULL;
+  if (dts == sptr->record_first->dts) return sptr->record_first;
+
+  p = sptr->record_first;
+  q = p->next_rec;
+
+  while (q != NULL && q->dts > dts) {
+    p = q;
+    q = q->next_rec;
+  }
+  if (q == NULL) {
+    return sptr->record_last;
+  }
+
+  p_diff = dts - p->dts;
+  q_diff = q->dts - dts;
+
+  if (p_diff < q_diff) return p;
+  if (q_diff > 90000) return p;
+
+  return q;
+}
+
+
+/*
+ * mpeg2ps_seek_frame - seek to the next timestamp after the search timestamp
+ * First, find a close DTS (usually minus 5 seconds or closer), then
+ * read frames until we get the frame after the timestamp.
+ */
+static Bool mpeg2ps_seek_frame (mpeg2ps_t *ps,
+				mpeg2ps_stream_t *sptr,
+				u64 search_msec_timestamp)
+{
+  u64 dts;
+  mpeg2ps_record_pes_t *rec;
+  u64 msec_ts;
+  u8 *buffer;
+  u32 buflen;
+
+  check_fd_for_stream(ps, sptr);
+  clear_stream_buffer(sptr);
+
+  if (search_msec_timestamp <= 1000) { // first second, start from begin...
+    file_seek_to(sptr->m_fd, sptr->first_pes_loc);
+    return GF_TRUE;
+  }
+  dts = search_msec_timestamp * 90; // 1000 timescale to 90000 timescale
+  dts += ps->first_dts;
+
+  /*
+   * see if the recorded data has anything close
+   */
+  rec = search_for_ts(sptr, dts);
+  if (rec != NULL) {
+    // see if it is close
+    // if we're plus or minus a second, seek to that.
+    if (rec->dts + 90000 >= dts && rec->dts <= dts + 90000) {
+      file_seek_to(sptr->m_fd, rec->location);
+      return GF_TRUE;
+    }
+    // at this point, rec is > a distance.  If within 5 or so seconds,
+
+    if (rec->dts + (5 * 90000) < dts) {
+      // more than 5 seconds away - skip and search
+      if (rec->next_rec == NULL) {
+		  mpeg2ps_binary_seek(ps, sptr, dts,
+			    rec->dts, rec->location,
+			    sptr->end_dts, sptr->end_dts_loc);
+      } else {
+		  mpeg2ps_binary_seek(ps, sptr, dts,
+			    rec->dts, rec->location,
+			    rec->next_rec->dts, rec->next_rec->location);
+      }
+    }
+    // otherwise, frame by frame search...
+  } else {
+    // we weren't able to find anything from the recording
+    mpeg2ps_binary_seek(ps, sptr, dts,
+			sptr->start_dts, sptr->first_pes_loc,
+			sptr->end_dts, sptr->end_dts_loc);
+  }
+  /*
+   * Now, the fun part - read frames until we're just past the time
+   */
+  clear_stream_buffer(sptr); // clear out any data, so we can read it
+  do {
+    if (mpeg2ps_stream_read_frame(sptr, &buffer, &buflen, GF_FALSE) == GF_FALSE)
+      return GF_FALSE;
+
+    msec_ts = stream_convert_frame_ts_to_msec(sptr, TS_MSEC,
+					      ps->first_dts, NULL);
+
+    if (msec_ts < search_msec_timestamp) {
+      // only advance the frame if we're not greater than the timestamp
+      advance_frame(sptr);
+    }
+  } while (msec_ts < search_msec_timestamp);
+
+  return GF_TRUE;
+}
+
+
+/*
+ * mpeg2ps_seek_video_frame - seek to the location that we're interested
+ * in, then scroll up to the next I frame
+ */
+Bool mpeg2ps_seek_video_frame (mpeg2ps_t *ps, u32 streamno,
+			       u64 msec_timestamp)
+{
+  mpeg2ps_stream_t *sptr;
+
+  if (invalid_video_streamno(ps, streamno)) return GF_FALSE;
+
+  sptr = ps->video_streams[streamno];
+  if (mpeg2ps_seek_frame(ps,
+			 sptr,
+			 msec_timestamp)
+			  == GF_FALSE) return GF_FALSE;
+
+  if (sptr->have_frame_loaded == GF_FALSE) {
+    return GF_FALSE;
+  }
+  return GF_TRUE;
+}
+/*
+ * mpeg2ps_seek_audio_frame - go to the closest audio frame after the
+ * timestamp
+ */
+Bool mpeg2ps_seek_audio_frame (mpeg2ps_t *ps,
+			       u32 streamno,
+			       u64 msec_timestamp)
+{
+  //  off_t closest_pes;
+  mpeg2ps_stream_t *sptr;
+
+  if (invalid_audio_streamno(ps, streamno)) return GF_FALSE;
+
+  sptr = ps->audio_streams[streamno];
+  if (mpeg2ps_seek_frame(ps,
+			 sptr,
+			 msec_timestamp) == GF_FALSE) return GF_FALSE;
+
+  return GF_TRUE;
+}
+
+u64 mpeg2ps_get_first_cts(mpeg2ps_t *ps)
+{
+	return ps->first_dts;
+}
+
 
 #endif /*GPAC_DISABLE_MPEG2PS*/

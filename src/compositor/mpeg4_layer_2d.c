@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -29,7 +29,7 @@
 #include "mpeg4_grouping.h"
 #include "visual_manager.h"
 
-#ifndef GPAC_DISABLE_VRML
+#if !defined(GPAC_DISABLE_VRML) && !defined(GPAC_DISABLE_COMPOSITOR)
 
 
 typedef struct
@@ -65,31 +65,6 @@ static void l2d_CheckBindables(GF_Node *n, GF_TraverseState *tr_state, Bool forc
 		gf_node_event_out(n, 5/*"viewport"*/);
 	}
 }
-
-
-#if VIEWPORT_CLIPS
-static void rect_intersect(GF_Rect *rc1, GF_Rect *rc2)
-{
-	if (! gf_rect_overlaps(*rc1, *rc2)) {
-		rc1->width = rc1->height = 0;
-		return;
-	}
-	if (rc2->x > rc1->x) {
-		rc1->width -= rc2->x - rc1->x;
-		rc1->x = rc2->x;
-	}
-	if (rc2->x + rc2->width < rc1->x + rc1->width) {
-		rc1->width = rc2->width + rc2->x - rc1->x;
-	}
-	if (rc2->y < rc1->y) {
-		rc1->height -= rc1->y - rc2->y;
-		rc1->y = rc2->y;
-	}
-	if (rc2->y - rc2->height > rc1->y - rc1->height) {
-		rc1->height = rc1->y - rc2->y + rc2->height;
-	}
-}
-#endif
 
 static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 {
@@ -200,7 +175,7 @@ static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 			visual_3d_flush_contexts(tr_state->visual, tr_state);
 			tr_state->traversing_mode = TRAVERSE_SORT;
 
-			assert(!gf_list_count(tr_state->visual->alpha_nodes_to_draw));
+			gf_assert(!gf_list_count(tr_state->visual->alpha_nodes_to_draw));
 			gf_list_del(tr_state->visual->alpha_nodes_to_draw);
 			tr_state->visual->alpha_nodes_to_draw = node_list_backup;
 
@@ -233,7 +208,7 @@ static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 				/*move viewport box in world coordinate*/
 				gf_mx2d_apply_rect(&backup, &tr_state->bounds);
 				/*and intersect with layer clipper*/
-				rect_intersect(&rc, &tr_state->bounds);
+				gf_rect_intersect(&rc, &tr_state->bounds);
 #endif
 			}
 
@@ -354,7 +329,7 @@ static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 #ifndef GPAC_DISABLE_3D
 	/*drawing a layer means drawing all sub-elements as a whole (no depth sorting with parents)*/
 	case TRAVERSE_DRAW_3D:
-		assert(0);
+		gf_assert(0);
 		break;
 #endif
 	}
@@ -393,5 +368,4 @@ void compositor_init_layer2d(GF_Compositor *compositor, GF_Node *node)
 	gf_node_set_callback_function(node, TraverseLayer2D);
 }
 
-
-#endif /*GPAC_DISABLE_VRML*/
+#endif //!defined(GPAC_DISABLE_VRML) && !defined(GPAC_DISABLE_COMPOSITOR)

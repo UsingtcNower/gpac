@@ -1,8 +1,8 @@
 /*
  *          GPAC - Multimedia Framework C SDK
  *
- *          Authors: Cyril Concolato
- *          Copyright (c) Telecom ParisTech 2000-2012
+ *          Authors: Cyril Concolato, Jean Le Feuvre
+ *          Copyright (c) Telecom ParisTech 2000-2026
  *                  All rights reserved
  *
  *  This file is part of GPAC / Scene Management sub-project
@@ -51,7 +51,7 @@ static void swf_svg_print(SWFReader *read, const char *format, ...) {
 
 	/* print the line */
 	va_start(args, format);
-	vsprintf(line, format, args);
+	vsnprintf(line, 2000, format, args);
 	va_end(args);
 	/* add the line to the buffer */
 	line_length = (u32)strlen(line);
@@ -63,7 +63,7 @@ static void swf_svg_print(SWFReader *read, const char *format, ...) {
 		memcpy(read->svg_data+read->frame_header_offset, line, line_length);
 		read->frame_header_offset += line_length;
 	} else {
-		strcpy(read->svg_data+read->svg_data_size, line);
+		memcpy(read->svg_data+read->svg_data_size, line, line_length+1);
 	}
 	read->svg_data_size = new_size;
 }
@@ -292,7 +292,7 @@ static GF_Err swf_svg_define_text(SWFReader *read, SWFText *text)
 			swf_svg_print(read, ">");
 			/*convert to UTF-8*/
 			{
-				size_t _len;
+				u32 _len;
 				u16     *str_w;
 				u16     *widestr;
 				char    *str;
@@ -306,8 +306,8 @@ static GF_Err swf_svg_define_text(SWFReader *read, SWFText *text)
 				str = (char*)gf_malloc(sizeof(char) * (gr->nbGlyphs+2));
 				widestr = str_w;
 				_len = gf_utf8_wcstombs(str, sizeof(u8) * (gr->nbGlyphs+1), (const unsigned short **) &widestr);
-				if (_len != (size_t) -1) {
-					str[(u32) _len] = 0;
+				if (_len != GF_UTF8_FAIL) {
+					str[_len] = 0;
 					swf_svg_print(read, "%s", str);
 				}
 			}
@@ -457,19 +457,26 @@ static GF_Err swf_svg_show_frame(SWFReader *read)
 
 		swf_svg_print(read, "</g>\n");
 	}
-	read->add_sample(read->user, read->svg_data, read->svg_data_size, read->current_frame*1000/read->frame_rate, (read->current_frame == 0));
-	gf_free(read->svg_data);
-	read->svg_data = NULL;
+
+	if (read->svg_data && read->svg_data_size)
+		read->add_sample(read->user, read->svg_data, read->svg_data_size, read->current_frame*1000/read->frame_rate, (read->current_frame == 0));
+
+	if (read->svg_data) {
+		gf_free(read->svg_data);
+		read->svg_data = NULL;
+	}
 	read->svg_data_size = 0;
 
 	read->empty_frame = GF_TRUE;
 	return GF_OK;
 }
 
-static void swf_svg_finalize(SWFReader *read)
+static void swf_svg_finalize(SWFReader *read, Bool is_destroy)
 {
-	swf_svg_print(read, "</svg>\n");
-	read->add_header(read->user, read->svg_data, read->svg_data_size, GF_FALSE);
+	if (!is_destroy) {
+		swf_svg_print(read, "</svg>\n");
+		read->add_header(read->user, read->svg_data, read->svg_data_size, GF_FALSE);
+	}
 	gf_free(read->svg_data);
 	read->svg_data = NULL;
 	read->svg_data_size = 0;
@@ -529,27 +536,27 @@ GF_Err swf_to_svg_init(SWFReader *read, u32 swf_flags, Float swf_flatten_angle)
 	return GF_OK;
 }
 
-GF_Err swf_svg_write_text_sample(void *user, const char *data, u32 length, u64 timestamp, Bool isRap)
+GF_Err swf_svg_write_text_sample(void *user, const u8 *data, u32 length, u64 timestamp, Bool isRap)
 {
 	FILE *svgFile = (FILE *)user;
 	u32  lengthWritten;
 
-	lengthWritten = (u32)fwrite(data, 1, length, svgFile);
+	lengthWritten = (u32) gf_fwrite(data, length, svgFile);
 	if (length != lengthWritten) {
-		return GF_BAD_PARAM;
+		return GF_IO_ERR;
 	} else {
 		return GF_OK;
 	}
 }
 
-GF_Err swf_svg_write_text_header(void *user, const char *data, u32 length, Bool isHeader)
+GF_Err swf_svg_write_text_header(void *user, const u8 *data, u32 length, Bool isHeader)
 {
 	FILE *svgFile = (FILE *)user;
 	u32  lengthWritten;
 
-	lengthWritten = (u32)fwrite(data, 1, length, svgFile);
+	lengthWritten = (u32) gf_fwrite(data, length, svgFile);
 	if (length != lengthWritten) {
-		return GF_BAD_PARAM;
+		return GF_IO_ERR;
 	} else {
 		return GF_OK;
 	}

@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2019
  *					All rights reserved
  *
  *  This file is part of GPAC / alsa audio output module
@@ -45,17 +45,12 @@ typedef struct
 static GF_Err ALSA_Setup(GF_AudioOutput*dr, void *os_handle, u32 num_buffers, u32 total_duration)
 {
 	int err;
-	const char *opt;
 	ALSAContext *ctx = (ALSAContext*)dr->opaque;
 
 
-	opt = gf_modules_get_option((GF_BaseInterface *)dr, "ALSA", "ForceSampleRate");
-	if (opt) ctx->force_sr = atoi(opt);
-	ctx->dev_name = gf_modules_get_option((GF_BaseInterface *)dr, "ALSA", "DeviceName");
-	if (!ctx->dev_name) {
-		ctx->dev_name = "hw:0,0";
-		gf_modules_set_option((GF_BaseInterface *)dr, "ALSA", "DeviceName", ctx->dev_name);
-	}
+	ctx->force_sr = gf_module_get_int((GF_BaseInterface *)dr, "force-rate");
+	ctx->dev_name = gf_module_get_key((GF_BaseInterface *)dr, "devname");
+	if (!ctx->dev_name) ctx->dev_name = "hw:0,0";
 
 	/*test device*/
 	err = snd_pcm_open(&ctx->playback_handle, ctx->dev_name, SND_PCM_STREAM_PLAYBACK, 0);
@@ -80,7 +75,7 @@ static void ALSA_Shutdown(GF_AudioOutput*dr)
 	ctx->wav_buf = NULL;
 }
 
-static GF_Err ALSA_ConfigureOutput(GF_AudioOutput*dr, u32 *SampleRate, u32 *NbChannels, u32 *nbBitsPerSample, u32 channel_cfg)
+static GF_Err ALSA_Configure(GF_AudioOutput*dr, u32 *SampleRate, u32 *NbChannels, u32 *audioFormat, u64 channel_cfg)
 {
 	snd_pcm_hw_params_t *hw_params = NULL;
 	int err;
@@ -122,12 +117,20 @@ static GF_Err ALSA_ConfigureOutput(GF_AudioOutput*dr, u32 *SampleRate, u32 *NbCh
 	/*set output format*/
 	ctx->nb_ch = (int) (*NbChannels);
 	ctx->block_align = ctx->nb_ch;
-	if ((*nbBitsPerSample) == 16) {
+
+	//only support for PCM 8/16/24/32 packet mode
+	switch (*audioFormat) {
+	case GF_AUDIO_FMT_U8:
+		err = snd_pcm_hw_params_set_format(ctx->playback_handle, hw_params, SND_PCM_FORMAT_U8);
+		break;
+	default:
+		*audioFormat = GF_AUDIO_FMT_S16;
+	case GF_AUDIO_FMT_S16:
 		ctx->block_align *= 2;
 		err = snd_pcm_hw_params_set_format(ctx->playback_handle, hw_params, SND_PCM_FORMAT_S16_LE);
-	} else {
-		err = snd_pcm_hw_params_set_format(ctx->playback_handle, hw_params, SND_PCM_FORMAT_U8);
+		break;
 	}
+
 	if (err < 0) {
 		GF_LOG(GF_LOG_ERROR, GF_LOG_MMIO, ("[ALSA] Cannot set sample format: %s\n", snd_strerror (err)) );
 		goto err_exit;
@@ -240,7 +243,8 @@ static void ALSA_WriteAudio(GF_AudioOutput*dr)
 		return;
 	}
 
-	//assert(nb_frames*ctx->block_align<=ctx->buf_size);
+	if (nb_frames*ctx->block_align > ctx->buf_size)
+		nb_frames = ctx->buf_size / ctx->block_align;
 	written = dr->FillBuffer(dr->audio_renderer, ctx->wav_buf, (u32) (ctx->block_align*nb_frames) );
 	if (!written) return;
 	written /= ctx->block_align;
@@ -254,18 +258,6 @@ static void ALSA_WriteAudio(GF_AudioOutput*dr)
 	if (err < 0) {
 		GF_LOG(GF_LOG_ERROR, GF_LOG_MMIO, ("[ALSA] Write failure: %s\n", snd_strerror(err)));
 	}
-}
-
-static void ALSA_SetVolume(GF_AudioOutput*dr, u32 Volume)
-{
-}
-
-static void ALSA_SetPan(GF_AudioOutput*dr, u32 Pan)
-{
-}
-
-static void ALSA_SetPriority(GF_AudioOutput*dr, u32 Priority)
-{
 }
 
 static u32 ALSA_GetAudioDelay(GF_AudioOutput*dr)
@@ -311,6 +303,12 @@ err_exit:
 	return GF_IO_ERR;
 }
 
+static GF_GPACArg ALSAArgs[] = {
+	GF_DEF_ARG("devname", NULL, "alsa device name", "hw:0,0", NULL, GF_ARG_STRING, 0),
+	GF_DEF_ARG("force-rate", NULL, "force alsa sample rate", "0", NULL, GF_ARG_INT, 0),
+	{0},
+};
+
 void *NewALSAOutput()
 {
 	ALSAContext *ctx;
@@ -327,14 +325,14 @@ void *NewALSAOutput()
 	driv->SelfThreaded = 0;
 	driv->Setup = ALSA_Setup;
 	driv->Shutdown = ALSA_Shutdown;
-	driv->ConfigureOutput = ALSA_ConfigureOutput;
+	driv->Configure = ALSA_Configure;
 	driv->GetAudioDelay = ALSA_GetAudioDelay;
-	driv->SetVolume = ALSA_SetVolume;
-	driv->SetPan = ALSA_SetPan;
-	driv->SetPriority = ALSA_SetPriority;
 	driv->QueryOutputSampleRate = ALSA_QueryOutputSampleRate;
 	driv->WriteAudio = ALSA_WriteAudio;
-	GF_REGISTER_MODULE_INTERFACE(driv, GF_AUDIO_OUTPUT_INTERFACE, "ALSA Audio Output", "gpac distribution");
+	driv->args = ALSAArgs;
+	driv->description = "Audio output using ASLA";
+
+	GF_REGISTER_MODULE_INTERFACE(driv, GF_AUDIO_OUTPUT_INTERFACE, "alsa", "gpac distribution");
 	return driv;
 }
 

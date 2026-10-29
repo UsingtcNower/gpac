@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -25,11 +25,10 @@
 
 #include "nodes_stacks.h"
 #include "visual_manager.h"
-/*for default scene view*/
-#include <gpac/internal/terminal_dev.h>
-#include <gpac/options.h>
 
+#if !defined(GPAC_DISABLE_COMPOSITOR)
 
+GF_EXPORT
 GF_Err gf_sc_get_viewpoint(GF_Compositor *compositor, u32 viewpoint_idx, const char **outName, Bool *is_bound)
 {
 #ifndef GPAC_DISABLE_VRML
@@ -43,18 +42,25 @@ GF_Err gf_sc_get_viewpoint(GF_Compositor *compositor, u32 viewpoint_idx, const c
 	n = (GF_Node*)gf_list_get(compositor->visual->view_stack, viewpoint_idx-1);
 	switch (gf_node_get_tag(n)) {
 	case TAG_MPEG4_Viewport:
-		*outName = ((M_Viewport*)n)->description.buffer;
-		*is_bound = ((M_Viewport*)n)->isBound;
+		if (outName)
+			*outName = ((M_Viewport*)n)->description.buffer;
+		if (is_bound)
+			*is_bound = ((M_Viewport*)n)->isBound;
 		return GF_OK;
 	case TAG_MPEG4_Viewpoint:
 #ifndef GPAC_DISABLE_X3D
 	case TAG_X3D_Viewpoint:
 #endif
-		*outName = ((M_Viewpoint*)n)->description.buffer;
-		*is_bound = ((M_Viewpoint*)n)->isBound;
+		if (outName)
+			*outName = ((M_Viewpoint*)n)->description.buffer;
+		if (is_bound)
+			*is_bound = ((M_Viewpoint*)n)->isBound;
 		return GF_OK;
 	default:
-		*outName = NULL;
+		if (outName)
+			*outName = NULL;
+		if (is_bound)
+			*is_bound = GF_FALSE;
 		return GF_OK;
 	}
 #else
@@ -62,6 +68,7 @@ GF_Err gf_sc_get_viewpoint(GF_Compositor *compositor, u32 viewpoint_idx, const c
 #endif
 }
 
+GF_EXPORT
 GF_Err gf_sc_set_viewpoint(GF_Compositor *compositor, u32 viewpoint_idx, const char *viewpoint_name)
 {
 #ifndef GPAC_DISABLE_VRML
@@ -112,7 +119,7 @@ GF_Err gf_sc_set_viewpoint(GF_Compositor *compositor, u32 viewpoint_idx, const c
 #ifndef GPAC_DISABLE_VRML
 
 
-#define VPCHANGED(__rend) { GF_Event evt; evt.type = GF_EVENT_VIEWPOINTS; gf_term_send_event(__rend->term, &evt); }
+#define VPCHANGED(__comp) { GF_Event evt; evt.type = GF_EVENT_VIEWPOINTS; gf_sc_send_event(__comp, &evt); }
 
 
 static void DestroyViewStack(GF_Node *node)
@@ -162,8 +169,8 @@ static void TraverseViewport(GF_Node *node, void *rs, Bool is_destroy)
 	/*first traverse, bound if needed*/
 	if (gf_list_find(tr_state->viewpoints, node) < 0) {
 		gf_list_add(tr_state->viewpoints, node);
-		assert(gf_list_find(st->reg_stacks, tr_state->viewpoints)==-1);
-		gf_list_add(st->reg_stacks, tr_state->viewpoints);
+		if (gf_list_find(st->reg_stacks, tr_state->viewpoints)<0)
+			gf_list_add(st->reg_stacks, tr_state->viewpoints);
 
 		if (gf_list_get(tr_state->viewpoints, 0) == vp) {
 			if (!vp->isBound) Bindable_SetIsBound(node, 1);
@@ -239,6 +246,8 @@ static void TraverseViewport(GF_Node *node, void *rs, Bool is_destroy)
 	default:
 		return;
 	}
+	if (!rc.width || !rc.height)
+		return;
 	sx = gf_divfix(rc.width, rc_bckup.width);
 	sy = gf_divfix(rc.height, rc_bckup.height);
 
@@ -351,8 +360,8 @@ static void TraverseViewpoint(GF_Node *node, void *rs, Bool is_destroy)
 	/*first traverse, bound if needed*/
 	if (gf_list_find(tr_state->viewpoints, node) < 0) {
 		gf_list_add(tr_state->viewpoints, node);
-		assert(gf_list_find(st->reg_stacks, tr_state->viewpoints)==-1);
-		gf_list_add(st->reg_stacks, tr_state->viewpoints);
+		if (gf_list_find(st->reg_stacks, tr_state->viewpoints)<0)
+			gf_list_add(st->reg_stacks, tr_state->viewpoints);
 
 		if (gf_list_get(tr_state->viewpoints, 0) == vp) {
 			if (!vp->isBound) Bindable_SetIsBound(node, 1);
@@ -426,9 +435,11 @@ void compositor_init_viewpoint(GF_Compositor *compositor, GF_Node *node)
 
 static void navinfo_set_bind(GF_Node *node, GF_Route *route)
 {
-	ViewStack *st = (ViewStack *) gf_node_get_private(node);
-	Bindable_OnSetBind(node, st->reg_stacks, NULL);
-	gf_sc_invalidate( gf_sc_get_compositor(node), NULL);
+	if (node) {
+		ViewStack *st = (ViewStack *) gf_node_get_private(node);
+		Bindable_OnSetBind(node, st->reg_stacks, NULL);
+		gf_sc_invalidate( gf_sc_get_compositor(node), NULL);
+	}
 }
 
 static void TraverseNavigationInfo(GF_Node *node, void *rs, Bool is_destroy)
@@ -465,8 +476,8 @@ static void TraverseNavigationInfo(GF_Node *node, void *rs, Bool is_destroy)
 		if (gf_list_get(tr_state->navigations, 0) == ni) {
 			if (!ni->isBound) Bindable_SetIsBound(node, 1);
 		}
-		assert(gf_list_find(st->reg_stacks, tr_state->navigations)==-1);
-		gf_list_add(st->reg_stacks, tr_state->navigations);
+		if (gf_list_find(st->reg_stacks, tr_state->navigations)<0)
+			gf_list_add(st->reg_stacks, tr_state->navigations);
 		gf_mx_copy(st->world_view_mx, tr_state->model_matrix);
 		/*in any case don't draw the first time*/
 		gf_sc_invalidate(tr_state->visual->compositor, NULL);
@@ -523,7 +534,8 @@ static void TraverseNavigationInfo(GF_Node *node, void *rs, Bool is_destroy)
 	if (ni->avatarSize.count>1) tr_state->camera->avatar_size.y = gf_mulfix(scale, ni->avatarSize.vals[1]);
 	if (ni->avatarSize.count>2) tr_state->camera->avatar_size.z = gf_mulfix(scale, ni->avatarSize.vals[2]);
 
-	if (0 && tr_state->pixel_metrics) {
+#if 0
+	if (tr_state->pixel_metrics) {
 		u32 s = MAX(tr_state->visual->width, tr_state->visual->height);
 		s /= 2;
 //		tr_state->camera->speed = ni->speed;
@@ -532,6 +544,8 @@ static void TraverseNavigationInfo(GF_Node *node, void *rs, Bool is_destroy)
 		tr_state->camera->avatar_size.y *= s;
 		tr_state->camera->avatar_size.z *= s;
 	}
+#endif
+
 #endif
 
 }
@@ -549,6 +563,12 @@ void compositor_init_navigation_info(GF_Compositor *compositor, GF_Node *node)
 	gf_node_set_private(node, st);
 	gf_node_set_callback_function(node, TraverseNavigationInfo);
 	((M_NavigationInfo*)node)->on_set_bind = navinfo_set_bind;
+
+#ifdef GPAC_ENABLE_COVERAGE
+	if (gf_sys_is_cov_mode()) {
+		navinfo_set_bind(NULL, NULL);
+	}
+#endif
 }
 
 
@@ -584,8 +604,8 @@ static void TraverseFog(GF_Node *node, void *rs, Bool is_destroy)
 		if (gf_list_get(tr_state->fogs, 0) == fog) {
 			if (!fog->isBound) Bindable_SetIsBound(node, 1);
 		}
-		assert(gf_list_find(st->reg_stacks, tr_state->fogs)==-1);
-		gf_list_add(st->reg_stacks, tr_state->fogs);
+		if (gf_list_find(st->reg_stacks, tr_state->fogs)<0)
+			gf_list_add(st->reg_stacks, tr_state->fogs);
 
 		gf_mx_copy(st->world_view_mx, tr_state->model_matrix);
 		/*in any case don't draw the first time*/
@@ -640,3 +660,6 @@ void compositor_init_fog(GF_Compositor *compositor, GF_Node *node)
 #endif	/*GPAC_DISABLE_3D*/
 
 #endif /*GPAC_DISABLE_VRML*/
+
+
+#endif //!defined(GPAC_DISABLE_COMPOSITOR)

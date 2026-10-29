@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -27,9 +27,7 @@
 
 #include "nodes_stacks.h"
 
-#ifndef GPAC_DISABLE_VRML
-
-#ifndef GPAC_DISABLE_3D
+#if !defined(GPAC_DISABLE_VRML) && !defined(GPAC_DISABLE_3D) && !defined(GPAC_DISABLE_COMPOSITOR)
 
 #include "texturing.h"
 #include "visual_manager.h"
@@ -132,14 +130,15 @@ static void back_build_dome(GF_Mesh *mesh, MFFloat *angles, MFColor *color, Bool
 	mesh_reset(mesh);
 
 	start_col.red = start_col.green = start_col.blue = 0;
+	start_col.alpha = FIX_ONE;
 	end_col = start_col;
+
 	if (color->count) {
 		COL_TO_RGBA(start_col, color->vals[0]);
 		end_col = start_col;
 		if (color->count>1) COL_TO_RGBA(end_col, color->vals[1]);
 	}
 
-	start_col.alpha = end_col.alpha = FIX_ONE;
 	vx.texcoords.x = vx.texcoords.y = 0;
 	vx.color = MESH_MAKE_COL(start_col);
 	vx.pos.x = vx.pos.z = 0;
@@ -175,7 +174,7 @@ static void back_build_dome(GF_Mesh *mesh, MFFloat *angles, MFColor *color, Bool
 
 		/*switch cols*/
 		if (angle >= next_angle) {
-			if (ang_idx+1<=angles->count) {
+			if (ang_idx+1 < angles->count) {
 				start_angle = next_angle;
 				next_angle = angles->vals[ang_idx+1];
 				if (next_angle>GF_PI) next_angle=GF_PI;
@@ -278,6 +277,8 @@ static void TraverseBackground(GF_Node *node, void *rs, Bool is_destroy)
 		DestroyBackground(node);
 		return;
 	}
+	if (tr_state->visual->compositor->noback)
+		return;
 
 	gf_node_dirty_clear(node, 0);
 	bck = (M_Background *)node;
@@ -291,8 +292,8 @@ static void TraverseBackground(GF_Node *node, void *rs, Bool is_destroy)
 	/*first traverse, bound if needed*/
 	if (gf_list_find(tr_state->backgrounds, node) < 0) {
 		gf_list_add(tr_state->backgrounds, node);
-		assert(gf_list_find(st->reg_stacks, tr_state->backgrounds)==-1);
-		gf_list_add(st->reg_stacks, tr_state->backgrounds);
+		if (gf_list_find(st->reg_stacks, tr_state->backgrounds)<0)
+			gf_list_add(st->reg_stacks, tr_state->backgrounds);
 		/*only bound if we're on top*/
 		if (gf_list_get(tr_state->backgrounds, 0) == bck) {
 			if (!bck->isBound) Bindable_SetIsBound(node, 1);
@@ -316,8 +317,8 @@ static void TraverseBackground(GF_Node *node, void *rs, Bool is_destroy)
 		if (tr_state->traversing_mode == TRAVERSE_SORT) {
 			gf_mx_copy(st->current_mx, tr_state->model_matrix);
 			if (!tr_state->pixel_metrics && tr_state->visual->compositor->inherit_type_3d) {
-				Fixed scale = gf_divfix(FIX_ONE, tr_state->min_hsize);
-				gf_mx_add_scale(&st->current_mx, scale, scale, scale);
+				Fixed pix_scale = gf_divfix(FIX_ONE, tr_state->min_hsize);
+				gf_mx_add_scale(&st->current_mx, pix_scale, pix_scale, pix_scale);
 
 			}
 		}
@@ -351,7 +352,7 @@ static void TraverseBackground(GF_Node *node, void *rs, Bool is_destroy)
 	res.x = res.y = res.z = 0;
 	res.q = FIX_ONE;
 	gf_mx_apply_vec_4x4(&tr_state->camera->unprojection, &res);
-	assert(res.q);
+	if (!res.q) return;
 	res.x = gf_divfix(res.x, res.q);
 	res.y = gf_divfix(res.y, res.q);
 	res.z = gf_divfix(res.z, res.q);
@@ -580,6 +581,4 @@ void compositor_background_modified(GF_Node *node)
 	gf_sc_invalidate(st->compositor, NULL);
 }
 
-#endif /*GPAC_DISABLE_3D*/
-
-#endif	/*GPAC_DISABLE_VRML*/
+#endif //!defined(GPAC_DISABLE_VRML) && !defined(GPAC_DISABLE_3D) && !defined(GPAC_DISABLE_COMPOSITOR)

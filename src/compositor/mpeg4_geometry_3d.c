@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -28,11 +28,8 @@
 #include "nodes_stacks.h"
 
 
-#ifndef GPAC_DISABLE_VRML
+#if !defined(GPAC_DISABLE_VRML) && !defined(GPAC_DISABLE_COMPOSITOR) && !defined(GPAC_DISABLE_3D)
 
-#ifndef GPAC_DISABLE_3D
-
-#include <gpac/options.h>
 #include <gpac/mediaobject.h>
 
 void drawable_3d_base_traverse(GF_Node *n, void *rs, Bool is_destroy, void (*build_shape)(GF_Node*,Drawable3D *,GF_TraverseState *) )
@@ -89,7 +86,7 @@ void compositor_init_box(GF_Compositor *compositor, GF_Node *node)
 static void build_shape_cone(GF_Node *n, Drawable3D *stack, GF_TraverseState *tr_state)
 {
 	M_Cone *co = (M_Cone *)n;
-	mesh_new_cone(stack->mesh, co->height, co->bottomRadius, co->bottom, co->side, tr_state->visual->compositor->high_speed);
+	mesh_new_cone(stack->mesh, co->height, co->bottomRadius, co->bottom, co->side, tr_state->visual->compositor->fast);
 }
 
 static void TraverseCone(GF_Node *n, void *rs, Bool is_destroy)
@@ -106,7 +103,7 @@ void compositor_init_cone(GF_Compositor *compositor, GF_Node *node)
 static void build_shape_cylinder(GF_Node *n, Drawable3D *stack, GF_TraverseState *tr_state)
 {
 	M_Cylinder *cy = (M_Cylinder *)n;
-	mesh_new_cylinder(stack->mesh, cy->height, cy->radius, cy->bottom, cy->side, cy->top, tr_state->visual->compositor->high_speed);
+	mesh_new_cylinder(stack->mesh, cy->height, cy->radius, cy->bottom, cy->side, cy->top, tr_state->visual->compositor->fast);
 }
 
 static void TraverseCylinder(GF_Node *n, void *rs, Bool is_destroy)
@@ -123,10 +120,10 @@ void compositor_init_cylinder(GF_Compositor *compositor, GF_Node *node)
 static void build_shape_sphere(GF_Node *n, Drawable3D *stack, GF_TraverseState *tr_state)
 {	
 	M_Sphere *sp = (M_Sphere *)n;
-	mesh_new_sphere(stack->mesh, sp->radius, tr_state->visual->compositor->high_speed, NULL);
+	mesh_new_sphere(stack->mesh, sp->radius, tr_state->visual->compositor->fast, NULL);
 }
 
-static void get_tx_coords_from_angle(GF_TraverseState *tr_state, GF_TextureHandler *txh, Bool horizontal, u32 *min_coord, u32 *max_coord)
+void get_tx_coords_from_angle(GF_TraverseState *tr_state, GF_TextureHandler *txh, Bool horizontal, u32 *min_coord, u32 *max_coord)
 {
 	GF_Vec target, ref;
 	Fixed dot, det, hfov, theta_angle, angle_start, angle_end, min_tx, max_tx;
@@ -187,8 +184,6 @@ static void get_tx_coords_from_angle(GF_TraverseState *tr_state, GF_TextureHandl
 	}
 	*min_coord= (u32) (min_tx*dim);
 	*max_coord= (u32) (max_tx*dim);
-
-//	fprintf(stderr, "%s Angle is %g (%g <-> %g) - min tx %g (%u) - max tx %g (%u)\n", horizontal ? "X" : "Y", theta_angle, angle_start, angle_end, min_tx, *min_coord, max_tx, *max_coord);
 }
 
 static void TraverseSphere(GF_Node *n, void *rs, Bool is_destroy)
@@ -250,29 +245,37 @@ static void TraverseIFS(GF_Node *n, void *rs, Bool is_destroy)
 static void IFS_SetColorIndex(GF_Node *node, GF_Route *route)
 {
 	M_IndexedFaceSet *ifs = (M_IndexedFaceSet *)node;
-	gf_sg_vrml_field_copy(&ifs->colorIndex, &ifs->set_colorIndex, GF_SG_VRML_MFINT32);
-	gf_sg_vrml_mf_reset(&ifs->set_colorIndex, GF_SG_VRML_MFINT32);
+	if (node) {
+		gf_sg_vrml_field_copy(&ifs->colorIndex, &ifs->set_colorIndex, GF_SG_VRML_MFINT32);
+		gf_sg_vrml_mf_reset(&ifs->set_colorIndex, GF_SG_VRML_MFINT32);
+	}
 }
 
 static void IFS_SetCoordIndex(GF_Node *node, GF_Route *route)
 {
 	M_IndexedFaceSet *ifs = (M_IndexedFaceSet *)node;
-	gf_sg_vrml_field_copy(&ifs->coordIndex, &ifs->set_coordIndex, GF_SG_VRML_MFINT32);
-	gf_sg_vrml_mf_reset(&ifs->set_coordIndex, GF_SG_VRML_MFINT32);
+	if (node) {
+		gf_sg_vrml_field_copy(&ifs->coordIndex, &ifs->set_coordIndex, GF_SG_VRML_MFINT32);
+		gf_sg_vrml_mf_reset(&ifs->set_coordIndex, GF_SG_VRML_MFINT32);
+	}
 }
 
 static void IFS_SetNormalIndex(GF_Node *node, GF_Route *route)
 {
 	M_IndexedFaceSet *ifs = (M_IndexedFaceSet *)node;
-	gf_sg_vrml_field_copy(&ifs->normalIndex, &ifs->set_normalIndex, GF_SG_VRML_MFINT32);
-	gf_sg_vrml_mf_reset(&ifs->set_normalIndex, GF_SG_VRML_MFINT32);
+	if (node) {
+		gf_sg_vrml_field_copy(&ifs->normalIndex, &ifs->set_normalIndex, GF_SG_VRML_MFINT32);
+		gf_sg_vrml_mf_reset(&ifs->set_normalIndex, GF_SG_VRML_MFINT32);
+	}
 }
 
 static void IFS_SetTexCoordIndex(GF_Node *node, GF_Route *route)
 {
 	M_IndexedFaceSet *ifs = (M_IndexedFaceSet *)node;
-	gf_sg_vrml_field_copy(&ifs->texCoordIndex, &ifs->set_texCoordIndex, GF_SG_VRML_MFINT32);
-	gf_sg_vrml_mf_reset(&ifs->set_texCoordIndex, GF_SG_VRML_MFINT32);
+	if (node) {
+		gf_sg_vrml_field_copy(&ifs->texCoordIndex, &ifs->set_texCoordIndex, GF_SG_VRML_MFINT32);
+		gf_sg_vrml_mf_reset(&ifs->set_texCoordIndex, GF_SG_VRML_MFINT32);
+	}
 }
 
 void compositor_init_ifs(GF_Compositor *compositor, GF_Node *node)
@@ -284,6 +287,16 @@ void compositor_init_ifs(GF_Compositor *compositor, GF_Node *node)
 	ifs->on_set_coordIndex = IFS_SetCoordIndex;
 	ifs->on_set_normalIndex = IFS_SetNormalIndex;
 	ifs->on_set_texCoordIndex = IFS_SetTexCoordIndex;
+
+#ifdef GPAC_ENABLE_COVERAGE
+	if (gf_sys_is_cov_mode()) {
+		IFS_SetCoordIndex(NULL, NULL);
+		IFS_SetColorIndex(NULL, NULL);
+		IFS_SetNormalIndex(NULL, NULL);
+		IFS_SetTexCoordIndex(NULL, NULL);
+	}
+#endif
+
 }
 
 static void build_shape_ils(GF_Node *n, Drawable3D *stack, GF_TraverseState *tr_state)
@@ -300,15 +313,19 @@ static void TraverseILS(GF_Node *n, void *rs, Bool is_destroy)
 static void ILS_SetColorIndex(GF_Node *node, GF_Route *route)
 {
 	M_IndexedLineSet *ils = (M_IndexedLineSet *)node;
-	gf_sg_vrml_field_copy(&ils->colorIndex, &ils->set_colorIndex, GF_SG_VRML_MFINT32);
-	gf_sg_vrml_mf_reset(&ils->set_colorIndex, GF_SG_VRML_MFINT32);
+	if (node) {
+		gf_sg_vrml_field_copy(&ils->colorIndex, &ils->set_colorIndex, GF_SG_VRML_MFINT32);
+		gf_sg_vrml_mf_reset(&ils->set_colorIndex, GF_SG_VRML_MFINT32);
+	}
 }
 
 static void ILS_SetCoordIndex(GF_Node *node, GF_Route *route)
 {
 	M_IndexedLineSet *ils = (M_IndexedLineSet *)node;
-	gf_sg_vrml_field_copy(&ils->coordIndex, &ils->set_coordIndex, GF_SG_VRML_MFINT32);
-	gf_sg_vrml_mf_reset(&ils->set_coordIndex, GF_SG_VRML_MFINT32);
+	if (node) {
+		gf_sg_vrml_field_copy(&ils->coordIndex, &ils->set_coordIndex, GF_SG_VRML_MFINT32);
+		gf_sg_vrml_mf_reset(&ils->set_coordIndex, GF_SG_VRML_MFINT32);
+	}
 }
 
 void compositor_init_ils(GF_Compositor *compositor, GF_Node *node)
@@ -318,6 +335,14 @@ void compositor_init_ils(GF_Compositor *compositor, GF_Node *node)
 	gf_node_set_callback_function(node, TraverseILS);
 	ils->on_set_colorIndex = ILS_SetColorIndex;
 	ils->on_set_coordIndex = ILS_SetCoordIndex;
+
+#ifdef GPAC_ENABLE_COVERAGE
+	if (gf_sys_is_cov_mode()) {
+		ILS_SetCoordIndex(NULL, NULL);
+		ILS_SetColorIndex(NULL, NULL);
+	}
+#endif
+
 }
 
 
@@ -334,8 +359,10 @@ static void TraverseElevationGrid(GF_Node *n, void *rs, Bool is_destroy)
 static void ElevationGrid_SetHeight(GF_Node *node, GF_Route *route)
 {
 	M_ElevationGrid *eg = (M_ElevationGrid *)node;
-	gf_sg_vrml_field_copy(&eg->height, &eg->set_height, GF_SG_VRML_MFFLOAT);
-	gf_sg_vrml_mf_reset(&eg->set_height, GF_SG_VRML_MFFLOAT);
+	if (node) {
+		gf_sg_vrml_field_copy(&eg->height, &eg->set_height, GF_SG_VRML_MFFLOAT);
+		gf_sg_vrml_mf_reset(&eg->set_height, GF_SG_VRML_MFFLOAT);
+	}
 }
 
 void compositor_init_elevation_grid(GF_Compositor *compositor, GF_Node *node)
@@ -344,6 +371,11 @@ void compositor_init_elevation_grid(GF_Compositor *compositor, GF_Node *node)
 	drawable_3d_new(node);
 	gf_node_set_callback_function(node, TraverseElevationGrid);
 	eg->on_set_height = ElevationGrid_SetHeight;
+#ifdef GPAC_ENABLE_COVERAGE
+	if (gf_sys_is_cov_mode()) {
+		ElevationGrid_SetHeight(NULL, NULL);
+	}
+#endif
 }
 
 static void build_shape_extrusion(GF_Node *n, Drawable3D *stack, GF_TraverseState *tr_state)
@@ -359,26 +391,34 @@ static void TraverseExtrusion(GF_Node *n, void *rs, Bool is_destroy)
 static void Extrusion_SetCrossSection(GF_Node *node, GF_Route *route)
 {
 	M_Extrusion *eg = (M_Extrusion *)node;
-	gf_sg_vrml_field_copy(&eg->crossSection, &eg->set_crossSection, GF_SG_VRML_MFVEC2F);
-	gf_sg_vrml_mf_reset(&eg->set_crossSection, GF_SG_VRML_MFVEC2F);
+	if (node) {
+		gf_sg_vrml_field_copy(&eg->crossSection, &eg->set_crossSection, GF_SG_VRML_MFVEC2F);
+		gf_sg_vrml_mf_reset(&eg->set_crossSection, GF_SG_VRML_MFVEC2F);
+	}
 }
 static void Extrusion_SetOrientation(GF_Node *node, GF_Route *route)
 {
 	M_Extrusion *eg = (M_Extrusion *)node;
-	gf_sg_vrml_field_copy(&eg->orientation, &eg->set_orientation, GF_SG_VRML_MFROTATION);
-	gf_sg_vrml_mf_reset(&eg->set_orientation, GF_SG_VRML_MFROTATION);
+	if (node) {
+		gf_sg_vrml_field_copy(&eg->orientation, &eg->set_orientation, GF_SG_VRML_MFROTATION);
+		gf_sg_vrml_mf_reset(&eg->set_orientation, GF_SG_VRML_MFROTATION);
+	}
 }
 static void Extrusion_SetScale(GF_Node *node, GF_Route *route)
 {
 	M_Extrusion *eg = (M_Extrusion *)node;
-	gf_sg_vrml_field_copy(&eg->scale, &eg->set_scale, GF_SG_VRML_MFVEC2F);
-	gf_sg_vrml_mf_reset(&eg->set_scale, GF_SG_VRML_MFVEC2F);
+	if (node) {
+		gf_sg_vrml_field_copy(&eg->scale, &eg->set_scale, GF_SG_VRML_MFVEC2F);
+		gf_sg_vrml_mf_reset(&eg->set_scale, GF_SG_VRML_MFVEC2F);
+	}
 }
 static void Extrusion_SetSpine(GF_Node *node, GF_Route *route)
 {
 	M_Extrusion *eg = (M_Extrusion *)node;
-	gf_sg_vrml_field_copy(&eg->spine, &eg->set_spine, GF_SG_VRML_MFVEC3F);
-	gf_sg_vrml_mf_reset(&eg->set_spine, GF_SG_VRML_MFVEC3F);
+	if (node) {
+		gf_sg_vrml_field_copy(&eg->spine, &eg->set_spine, GF_SG_VRML_MFVEC3F);
+		gf_sg_vrml_mf_reset(&eg->set_spine, GF_SG_VRML_MFVEC3F);
+	}
 }
 void compositor_init_extrusion(GF_Compositor *compositor, GF_Node *node)
 {
@@ -389,6 +429,16 @@ void compositor_init_extrusion(GF_Compositor *compositor, GF_Node *node)
 	ext->on_set_orientation = Extrusion_SetOrientation;
 	ext->on_set_scale = Extrusion_SetScale;
 	ext->on_set_spine = Extrusion_SetSpine;
+
+#ifdef GPAC_ENABLE_COVERAGE
+	if (gf_sys_is_cov_mode()) {
+		Extrusion_SetCrossSection(NULL, NULL);
+		Extrusion_SetOrientation(NULL, NULL);
+		Extrusion_SetScale(NULL, NULL);
+		Extrusion_SetSpine(NULL, NULL);
+	}
+#endif
+
 }
 
 
@@ -619,6 +669,4 @@ void compositor_init_non_linear_deformer(GF_Compositor *compositor, GF_Node *nod
 	gf_node_set_callback_function(node, TraverseNonLinearDeformer);
 }
 
-#endif /*GPAC_DISABLE_3D*/
-
-#endif /*GPAC_DISABLE_VRML*/
+#endif // !defined(GPAC_DISABLE_VRML) && !defined(GPAC_DISABLE_COMPOSITOR) && !defined(GPAC_DISABLE_3D)

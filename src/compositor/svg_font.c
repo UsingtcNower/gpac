@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2007-2012
+ *			Copyright (c) Telecom ParisTech 2007-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -25,7 +25,7 @@
 
 #include <gpac/utf.h>
 
-#ifndef GPAC_DISABLE_SVG
+#if !defined(GPAC_DISABLE_SVG) &&  !defined(GPAC_DISABLE_COMPOSITOR)
 
 #include "visual_manager.h"
 #include "nodes_stacks.h"
@@ -44,7 +44,7 @@ typedef struct
 static GF_Err svg_font_get_glyphs(void *udta, const char *utf_string, u32 *glyph_buffer, u32 *io_glyph_buffer_size, const char *lang, Bool *is_rtl)
 {
 	u32 prev_c;
-	size_t len;
+	u32 len;
 	u32 i, gl_idx;
 	u16 *utf_res;
 	GF_Node *node = (GF_Node *)udta;
@@ -64,16 +64,16 @@ static GF_Err svg_font_get_glyphs(void *udta, const char *utf_string, u32 *glyph
 	}
 
 	len = gf_utf8_mbstowcs((u16*) glyph_buffer, *io_glyph_buffer_size, (const char**)&utf8);
-	if (len == (size_t) -1) return GF_IO_ERR;
+	if (len == GF_UTF8_FAIL) return GF_IO_ERR;
 	/*should not happen*/
 	if (utf8) return GF_IO_ERR;
 
 	/*perform bidi relayout*/
 	utf_res = (u16 *) glyph_buffer;
-	*is_rtl = gf_utf8_reorder_bidi(utf_res, (u32) len);
+	*is_rtl = gf_utf8_reorder_bidi(utf_res, len);
 
 	/*move 16bit buffer to 32bit*/
-	for (i=(u32)len; i>0; i--) {
+	for (i=len; i>0; i--) {
 		glyph_buffer[i-1] = utf_res[i-1];
 	}
 
@@ -194,18 +194,16 @@ static void svg_traverse_font(GF_Node *node, void *rs, Bool is_destroy)
 
 static void svg_font_on_load(GF_Node *handler, GF_DOM_Event *event, GF_Node *observer)
 {
-	GF_Compositor *compositor;
 	GF_Font *font;
-	assert(event->currentTarget->ptr_type==GF_DOM_EVENT_TARGET_NODE);
-	assert(gf_node_get_tag((GF_Node*)event->currentTarget->ptr)==TAG_SVG_font);
+	gf_assert(event->currentTarget->ptr_type==GF_DOM_EVENT_TARGET_NODE);
+	gf_assert(gf_node_get_tag((GF_Node*)event->currentTarget->ptr)==TAG_SVG_font);
 	font = gf_node_get_private((GF_Node*)event->currentTarget->ptr);
 	font->not_loaded = 0;
-	compositor = (GF_Compositor *)gf_node_get_private((GF_Node *)handler);
 
 	/*brute-force signaling that all fonts have changed and texts must be recomputed*/
-	compositor->reset_fonts = 1;
-	gf_sc_next_frame_state(compositor, GF_SC_DRAW_FRAME);
-	compositor->fonts_pending--;
+	font->compositor->reset_fonts = 1;
+	gf_sc_next_frame_state(font->compositor, GF_SC_DRAW_FRAME);
+	font->compositor->fonts_pending--;
 }
 
 void compositor_init_svg_font(GF_Compositor *compositor, GF_Node *node)
@@ -234,6 +232,7 @@ void compositor_init_svg_font(GF_Compositor *compositor, GF_Node *node)
 		return;
 	}
 	font->ft_mgr = compositor->font_manager;
+	font->compositor = compositor;
 
 	font->get_glyphs = svg_font_get_glyphs;
 	font->load_glyph = svg_font_load_glyph;
@@ -318,7 +317,6 @@ void compositor_init_svg_font(GF_Compositor *compositor, GF_Node *node)
 	/*wait for onLoad event before activating the font, otherwise we may not have all the glyphs*/
 	handler = gf_dom_listener_build(node_font, GF_EVENT_LOAD, 0);
 	handler->handle_event = svg_font_on_load;
-	gf_node_set_private((GF_Node *)handler, compositor);
 }
 
 
@@ -351,7 +349,7 @@ void compositor_init_svg_glyph(GF_Compositor *compositor, GF_Node *node)
 {
 	u16 utf_name[20];
 	u8 *utf8;
-	size_t len;
+	u32 len;
 	GF_Rect rc;
 	GF_Glyph *glyph;
 	GF_Font *font;
@@ -378,7 +376,8 @@ void compositor_init_svg_glyph(GF_Compositor *compositor, GF_Node *node)
 	GF_SAFEALLOC(st, SVG_GlyphStack);
 	if (!st) return;
 	utf8 = (u8 *) *atts.unicode;
-	len = gf_utf8_mbstowcs(utf_name, 200, (const char **) &utf8);
+	len = gf_utf8_mbstowcs(utf_name, sizeof(utf_name), (const char **) &utf8);
+	if (len == GF_UTF8_FAIL) return;
 	/*this is a single glyph*/
 	if (len==1) {
 		st->glyph.utf_name = utf_name[0];
@@ -443,17 +442,33 @@ static Bool svg_font_uri_check(GF_Node *node, FontURIStack *st)
 		if (!font_name) return 0;
 		if (!st->mo) {
 			st->mo = gf_mo_load_xlink_resource(node, 0, 0, -1);
-			if (!st->mo) return 0;
+			if (!st->mo) {
+				st->compositor->fonts_pending--;
+				return 0;
+			}
 		}
 		ext_sg = gf_mo_get_scenegraph(st->mo);
-		if (!ext_sg) return 0;
+		if (!ext_sg) {
+			st->compositor->fonts_pending--;
+			return 0;
+		}
 		atts.xlink_href->target = gf_sg_find_node_by_name(ext_sg, font_name+1);
-		if (!atts.xlink_href->target) return 0;
+		if (!atts.xlink_href->target) {
+			st->compositor->fonts_pending--;
+			return 0;
+		}
 	}
 	font_elt = atts.xlink_href->target;
-	if (gf_node_get_tag(font_elt) != TAG_SVG_font) return 0;
+	if (gf_node_get_tag(font_elt) != TAG_SVG_font) {
+		st->compositor->fonts_pending--;
+		return 0;
+	}
 	font = gf_node_get_private(font_elt);
-	if (!font) return 0;
+	if (!font) {
+		st->compositor->fonts_pending--;
+		return 0;
+	}
+
 	st->alias = font;
 
 	gf_mo_is_done(st->mo);
@@ -469,16 +484,6 @@ GF_Font *svg_font_uri_get_alias(void *udta)
 		return NULL;
 	}
 	return st->alias;
-}
-
-static GF_Err svg_font_uri_get_glyphs(void *udta, const char *utf_string, u32 *glyph_buffer, u32 *io_glyph_buffer_size, const char *lang, Bool *is_rtl)
-{
-	return GF_URL_ERROR;
-}
-
-static GF_Glyph *svg_font_uri_load_glyph(void *udta, u32 glyph_name)
-{
-	return NULL;
 }
 
 static void svg_traverse_font_face_uri(GF_Node *node, void *rs, Bool is_destroy)
@@ -545,8 +550,6 @@ void compositor_init_svg_font_face_uri(GF_Compositor *compositor, GF_Node *node)
 
 	font->ft_mgr = compositor->font_manager;
 
-	font->get_glyphs = svg_font_uri_get_glyphs;
-	font->load_glyph = svg_font_uri_load_glyph;
 	font->get_alias = svg_font_uri_get_alias;
 	font->udta = node;
 	font->name = gf_strdup(atts.font_family->value);
@@ -559,5 +562,4 @@ void compositor_init_svg_font_face_uri(GF_Compositor *compositor, GF_Node *node)
 }
 
 
-#endif /*GPAC_DISABLE_SVG*/
-
+#endif //!defined(GPAC_DISABLE_SVG) &&  !defined(GPAC_DISABLE_COMPOSITOR)

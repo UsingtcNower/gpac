@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2026
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Graph sub-project
@@ -157,12 +157,23 @@ void gf_sg_vrml_parent_setup(GF_Node *pNode)
 
 void gf_sg_vrml_parent_destroy(GF_Node *pNode)
 {
-	GF_VRMLParent *par = (GF_VRMLParent *)pNode;
-	gf_node_unregister_children(pNode, par->children);
-	gf_node_unregister_children(pNode, par->addChildren);
-	gf_node_unregister_children(pNode, par->removeChildren);
+	GF_VRMLParent* par = (GF_VRMLParent*)pNode;
+	GF_ChildNodeItem* addChildren = par->addChildren;
+	GF_ChildNodeItem* removeChildren = par->removeChildren;
+	par->addChildren = NULL;
+	par->removeChildren = NULL;
+	while (par->children) {
+		GF_ChildNodeItem *cur = par->children;
+		par->children = cur->next;
+		if (cur->node != pNode) gf_node_unregister(cur->node, pNode);
+		gf_free(cur);
+	}
+	par->children = NULL;
+	gf_node_unregister_children(pNode, addChildren);
+	gf_node_unregister_children(pNode, removeChildren);
 }
 
+GF_EXPORT
 GF_Err gf_sg_delete_all_protos(GF_SceneGraph *scene)
 {
 	if (!scene) return GF_BAD_PARAM;
@@ -180,7 +191,7 @@ void gf_sg_set_proto_loader(GF_SceneGraph *scene, GF_SceneGraph *(*GetExternProt
 	scene->GetExternProtoLib = GetExternProtoLib;
 }
 
-
+GF_EXPORT
 u32 gf_sg_get_next_available_route_id(GF_SceneGraph *sg)
 {
 	u32 i, count;
@@ -200,11 +211,13 @@ u32 gf_sg_get_next_available_route_id(GF_SceneGraph *sg)
 	}
 }
 
+GF_EXPORT
 void gf_sg_set_max_defined_route_id(GF_SceneGraph *sg, u32 ID)
 {
 	sg->max_defined_route_id = MAX(sg->max_defined_route_id, ID);
 }
 
+GF_EXPORT
 u32 gf_sg_get_next_available_proto_id(GF_SceneGraph *sg)
 {
 	u32 i, count;
@@ -224,6 +237,7 @@ u32 gf_sg_get_next_available_proto_id(GF_SceneGraph *sg)
 }
 
 //adds a child in the children list
+GF_EXPORT
 GF_Err gf_node_insert_child(GF_Node *parent, GF_Node *new_child, s32 Position)
 {
 	GF_ParentNode *node = (GF_ParentNode *) parent;
@@ -235,7 +249,7 @@ GF_Err gf_node_insert_child(GF_Node *parent, GF_Node *new_child, s32 Position)
 	return GF_OK;
 }
 
-/*for V4Studio...*/
+#if 0
 GF_Err gf_node_remove_child(GF_Node *parent, GF_Node *toremove_child)
 {
 	if (!gf_node_list_del_child(& ((GF_ParentNode *) parent)->children, toremove_child)) return GF_BAD_PARAM;
@@ -243,18 +257,21 @@ GF_Err gf_node_remove_child(GF_Node *parent, GF_Node *toremove_child)
 	/*gf_node_unregister(toremove_child, parent);*/
 	return GF_OK;
 }
+#endif
 
+GF_EXPORT
 void gf_sg_script_load(GF_Node *n)
 {
 	if (n && n->sgprivate->scenegraph->script_load) n->sgprivate->scenegraph->script_load(n);
 }
 
+GF_EXPORT
 GF_Proto *gf_sg_find_proto(GF_SceneGraph *sg, u32 ProtoID, char *name)
 {
 	GF_Proto *proto;
 	u32 i;
 
-	assert(sg);
+	gf_assert(sg);
 
 	/*browse all top-level */
 	i=0;
@@ -476,6 +493,7 @@ static MFAttrRef *NewMFAttrRef()
 	return tmp;
 }
 
+GF_EXPORT
 void *gf_sg_vrml_field_pointer_new(u32 FieldType)
 {
 	switch (FieldType) {
@@ -602,10 +620,6 @@ void gf_sg_sfimage_del(SFImage im) {
 void gf_sg_sfstring_del(SFString par) {
 	if (par.buffer) gf_free(par.buffer);
 }
-void gf_sg_sfscript_del(SFScript par) {
-	if (par.script_text) gf_free(par.script_text);
-}
-
 
 void gf_sg_sfcommand_del(SFCommandBuffer cb)
 {
@@ -618,6 +632,7 @@ void gf_sg_sfcommand_del(SFCommandBuffer cb)
 	if (cb.buffer) gf_free(cb.buffer);
 }
 
+GF_EXPORT
 void gf_sg_vrml_field_pointer_del(void *field, u32 FieldType)
 {
 	GF_Node *node;
@@ -703,14 +718,18 @@ void gf_sg_vrml_field_pointer_del(void *field, u32 FieldType)
 		break;
 	//used only in proto since this field is created by default for regular nodes
 	case GF_SG_VRML_MFNODE:
-		assert(0);
+		gf_assert(0);
 		return;
 	case GF_SG_VRML_MFSCRIPT:
 		gf_sg_mfscript_del( * ((MFScript *) field));
 		break;
+	case GF_SG_VRML_SFSCRIPT:
+		if (field && ((SFScript*)field)->script_text)
+			gf_free(((SFScript*)field)->script_text);
+		break;
 
 	default:
-		assert(0);
+		gf_assert(0);
 		return;
 	}
 	//free pointer
@@ -739,7 +758,7 @@ const char *gf_sg_vrml_get_event_type_name(u32 EventType, Bool forX3D)
 }
 
 GF_EXPORT
-const char *gf_sg_vrml_get_field_type_by_name(u32 FieldType)
+const char *gf_sg_vrml_get_field_type_name(u32 FieldType)
 {
 
 	switch (FieldType) {
@@ -874,6 +893,8 @@ void gf_sg_sfurl_del(SFURL url) {
 GF_EXPORT
 Bool gf_sg_vrml_is_sf_field(u32 FieldType)
 {
+	//special case for AttrRef declared after first MF
+	if (FieldType==GF_SG_VRML_SFATTRREF) return GF_TRUE;
 	return (FieldType<GF_SG_VRML_FIRST_MF);
 }
 
@@ -1000,6 +1021,9 @@ u32 gf_sg_vrml_get_sf_type(u32 FieldType)
 	case GF_SG_VRML_SFVEC3F:
 	case GF_SG_VRML_MFVEC3F:
 		return GF_SG_VRML_SFVEC3F;
+	case GF_SG_VRML_SFVEC4F:
+	case GF_SG_VRML_MFVEC4F:
+		return GF_SG_VRML_SFVEC4F;
 	case GF_SG_VRML_SFVEC2F:
 	case GF_SG_VRML_MFVEC2F:
 		return GF_SG_VRML_SFVEC2F;
@@ -1046,6 +1070,7 @@ u32 gf_sg_vrml_get_sf_type(u32 FieldType)
 //	newly created slot
 //	!! Doesnt work for MFNodes
 //	InsertAt is the 0-based index for the new slot
+GF_EXPORT
 GF_Err gf_sg_vrml_mf_insert(void *mf, u32 FieldType, void **new_ptr, u32 InsertAt)
 {
 	char *buffer;
@@ -1104,7 +1129,7 @@ GF_EXPORT
 GF_Err gf_sg_vrml_mf_reset(void *mf, u32 FieldType)
 {
 	GenMFField *mffield = (GenMFField *)mf;
-	if (!mffield->array) return GF_OK;
+	if (!mffield || !mffield->array) return GF_OK;
 
 	//field we can't copy
 	if (gf_sg_vrml_is_sf_field(FieldType)) return GF_BAD_PARAM;
@@ -1141,6 +1166,7 @@ GF_Err gf_sg_vrml_mf_alloc(void *mf, u32 FieldType, u32 NbItems)
 
 	if (gf_sg_vrml_is_sf_field(FieldType)) return GF_BAD_PARAM;
 	if (FieldType == GF_SG_VRML_MFNODE) return GF_BAD_PARAM;
+	if (!mffield) return GF_NON_COMPLIANT_BITSTREAM;
 
 	FieldSize = gf_sg_vrml_get_sf_size(FieldType);
 
@@ -1167,6 +1193,7 @@ GF_Err gf_sg_vrml_mf_get_item(void *mf, u32 FieldType, void **new_ptr, u32 ItemP
 	*new_ptr = NULL;
 	if (gf_sg_vrml_is_sf_field(FieldType)) return GF_BAD_PARAM;
 	if (FieldType == GF_SG_VRML_MFNODE) return GF_BAD_PARAM;
+	if (!mffield) return GF_NON_COMPLIANT_BITSTREAM;
 
 	FieldSize = gf_sg_vrml_get_sf_size(FieldType);
 
@@ -1182,16 +1209,19 @@ GF_EXPORT
 GF_Err gf_sg_vrml_mf_append(void *mf, u32 FieldType, void **new_ptr)
 {
 	GenMFField *mffield = (GenMFField *)mf;
+	if (!mf) return GF_NON_COMPLIANT_BITSTREAM;
 	return gf_sg_vrml_mf_insert(mf, FieldType, new_ptr, mffield->count+2);
 }
 
 
 //remove the specified item (0-based index)
+GF_EXPORT
 GF_Err gf_sg_vrml_mf_remove(void *mf, u32 FieldType, u32 RemoveFrom)
 {
 	char *buffer;
 	u32 FieldSize, i, k;
 	GenMFField *mffield = (GenMFField *)mf;
+	if (!mffield) return GF_NON_COMPLIANT_BITSTREAM;
 
 	FieldSize = gf_sg_vrml_get_sf_size(FieldType);
 
@@ -1201,7 +1231,8 @@ GF_Err gf_sg_vrml_mf_remove(void *mf, u32 FieldType, u32 RemoveFrom)
 	if (!mffield->count || RemoveFrom >= mffield->count) return GF_BAD_PARAM;
 
 	if (mffield->count == 1) {
-		gf_free(mffield->array);
+		u32 sf_type = gf_sg_vrml_get_sf_type(FieldType);
+		gf_sg_vrml_field_pointer_del(mffield->array, sf_type);
 		mffield->array = NULL;
 		mffield->count = 0;
 		return GF_OK;
@@ -1226,7 +1257,6 @@ as a field type (it's just a stupid encoding trick) */
 void VRML_FieldCopyCast(void *dest, u32 dst_field_type, void *orig, u32 ori_field_type)
 {
 	SFURL *url;
-	char tmp[50];
 	u32 size, i, sf_type_ori, sf_type_dst;
 	void *dst_field, *orig_field;
 	if (!dest || !orig) return;
@@ -1236,6 +1266,7 @@ void VRML_FieldCopyCast(void *dest, u32 dst_field_type, void *orig, u32 ori_fiel
 		if (ori_field_type == GF_SG_VRML_SFURL) {
 			url = ((SFURL *)orig);
 			if (url->OD_ID>0) {
+				char tmp[50];
 				sprintf(tmp, "%d", url->OD_ID);
 				if ( ((SFString*)dest)->buffer) gf_free(((SFString*)dest)->buffer);
 				((SFString*)dest)->buffer = gf_strdup(tmp);
@@ -1347,8 +1378,12 @@ void gf_sg_vrml_field_clone(void *dest, void *orig, u32 field_type, GF_SceneGrap
 		((SFImage *)dest)->height = ((SFImage *)orig)->height;
 		((SFImage *)dest)->numComponents  = ((SFImage *)orig)->numComponents;
 		size = ((SFImage *)dest)->width * ((SFImage *)dest)->height * ((SFImage *)dest)->numComponents;
-		((SFImage *)dest)->pixels = (u8*)gf_malloc(sizeof(char)*size);
-		memcpy(((SFImage *)dest)->pixels, ((SFImage *)orig)->pixels, sizeof(char)*size);
+		if (((SFImage *)orig)->pixels && size > 0) {
+			((SFImage *)dest)->pixels = (u8*)gf_malloc(sizeof(char)*size);
+			memcpy(((SFImage *)dest)->pixels, ((SFImage *)orig)->pixels, sizeof(char)*size);
+		} else {
+			((SFImage *)dest)->pixels = NULL;
+		}
 		break;
 	case GF_SG_VRML_SFCOMMANDBUFFER:
 	{
@@ -1398,7 +1433,8 @@ void gf_sg_vrml_field_clone(void *dest, void *orig, u32 field_type, GF_SceneGrap
 			((GenMFField *)dest)->array = gf_realloc(((GenMFField *)dest)->array, size);
 			((GenMFField *)dest)->count = ((GenMFField *)orig)->count;
 		}
-		memcpy(((GenMFField *)dest)->array, ((GenMFField *)orig)->array, size);
+		if (size)
+			memcpy(((GenMFField *)dest)->array, ((GenMFField *)orig)->array, size);
 		break;
 	//complex MFFields
 	case GF_SG_VRML_MFSTRING:
@@ -1480,7 +1516,7 @@ Bool gf_sg_vrml_field_equal(void *dest, void *orig, u32 field_type)
 		} else {
 			if ( ((SFURL *)orig)->url && ! ((SFURL *)dest)->url) changed = 1;
 			else if ( ! ((SFURL *)orig)->url && ((SFURL *)dest)->url) changed = 1;
-			else if ( strcmp( ((SFURL *)orig)->url , ((SFURL *)dest)->url) ) changed = 1;
+			else if ( ((SFURL *)orig)->url && ((SFURL *)dest)->url && strcmp( ((SFURL *)orig)->url , ((SFURL *)dest)->url) ) changed = 1;
 		}
 		break;
 	case GF_SG_VRML_SFIMAGE:
@@ -1538,10 +1574,10 @@ SFColorRGBA gf_sg_sfcolor_to_rgba(SFColor val)
 }
 
 
-
+GF_EXPORT
 u32 gf_node_get_num_fields_in_mode(GF_Node *Node, u8 IndexMode)
 {
-	assert(Node);
+	gf_assert(Node);
 	if (Node->sgprivate->tag == TAG_ProtoNode) return gf_sg_proto_get_num_fields(Node, IndexMode);
 	else if (Node->sgprivate->tag == TAG_MPEG4_Script)
 		return gf_sg_script_get_num_fields(Node, IndexMode);
@@ -1722,14 +1758,14 @@ Bool gf_sg_vrml_node_changed(GF_Node *node, GF_FieldInfo *field)
 	return 0;
 }
 
-
+#if 0 //unused
 char *gf_node_vrml_dump_attribute(GF_Node *n, GF_FieldInfo *info)
 {
 	char szVal[1024];
 
 	switch (info->fieldType) {
 	case GF_SG_VRML_SFBOOL:
-		strcpy(szVal, *((SFBool*)info->far_ptr) ? "TRUE" : "FALSE");
+		gf_strcpy(szVal, *((SFBool*)info->far_ptr) ? "TRUE" : "FALSE");
 		return gf_strdup(szVal);
 	case GF_SG_VRML_SFINT32:
 		sprintf(szVal, "%d", *((SFInt32*)info->far_ptr) );
@@ -1807,7 +1843,7 @@ char *gf_node_vrml_dump_attribute(GF_Node *n, GF_FieldInfo *info)
 				i+=4;
 				break;
 			}
-			strcat(buf, szVal);
+			gf_strcat(buf, szVal);
 		}
 		return buf;
 	}
@@ -1817,6 +1853,8 @@ char *gf_node_vrml_dump_attribute(GF_Node *n, GF_FieldInfo *info)
 	/*todo - dump MFFields*/
 	return NULL;
 }
+#endif
+
 
 #endif /*GPAC_DISABLE_VRML*/
 

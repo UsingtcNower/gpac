@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2024
  *					All rights reserved
  *
  *  This file is part of GPAC / common tools sub-project
@@ -26,12 +26,10 @@
 #include <gpac/base_coding.h>
 #include <gpac/constants.h>
 
-#ifndef GPAC_DISABLE_CORE_TOOLS
-
 static const char base_64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 GF_EXPORT
-u32 gf_base64_encode(const char *_in, u32 inSize, char *_out, u32 outSize)
+u32 gf_base64_encode(const u8 *_in, u32 inSize, u8 *_out, u32 outSize)
 {
 	s32 padding;
 	u32 i = 0, j = 0;
@@ -42,6 +40,8 @@ u32 gf_base64_encode(const char *_in, u32 inSize, char *_out, u32 outSize)
 
 	while (i < inSize) {
 		padding = 3 - (inSize - i);
+		if (j+4>=outSize)
+			return 0;
 		if (padding == 2) {
 			out[j] = base_64[in[i]>>2];
 			out[j+1] = base_64[(in[i] & 0x03) << 4];
@@ -103,7 +103,7 @@ u32 load_block(char *in, u32 size, u32 pos, char *out)
 }
 
 GF_EXPORT
-u32 gf_base64_decode(char *in_buf, u32 inSize, char *out, u32 outSize)
+u32 gf_base64_decode(u8 *in_buf, u32 inSize, u8 *out, u32 outSize)
 {
 	u32 i = 0, j = 0, padding;
 	unsigned char c[4], in[4];
@@ -141,27 +141,25 @@ u32 gf_base64_decode(char *in_buf, u32 inSize, char *out, u32 outSize)
 static const char base_16[] = "0123456789abcdef";
 
 GF_EXPORT
-u32 gf_base16_encode(char *_in, u32 inSize, char *_out, u32 outSize)
+u32 gf_base16_encode(u8 *_in, u32 inSize, u8 *_out, u32 outSize)
 {
 	u32 i = 0;
 	unsigned char *in = (unsigned char *)_in;
 	unsigned char *out = (unsigned char *)_out;
 
-	if (outSize < (inSize * 2)+1) return 0;
+	if (outSize < (inSize * 2)) return 0;
 
 	for (i=0; i<inSize; i++) {
 		out[2*i] = base_16[((in[i] & 0xf0) >> 4)];
 		out[2*i+1] = base_16[(in[i] & 0x0f)];
 	}
-	out[(inSize * 2)] = 0;
-
-	return i;
+	return inSize * 2;
 }
 
 #define char16(nb) (((nb) < 97) ? ((nb)-48) : ((nb)-87))
 
 GF_EXPORT
-u32 gf_base16_decode(char *in, u32 inSize, char *out, u32 outSize)
+u32 gf_base16_decode(u8 *in, u32 inSize, u8 *out, u32 outSize)
 {
 	u32 j=0;
 	u32 c[2] = {0,0};
@@ -184,23 +182,26 @@ u32 gf_base16_decode(char *in, u32 inSize, char *out, u32 outSize)
 
 #include <zlib.h>
 
-#define ZLIB_COMPRESS_SAFE	4
-
 GF_EXPORT
-GF_Err gf_gz_compress_payload(char **data, u32 data_len, u32 *max_size)
+GF_Err gf_gz_compress_payload_ex(u8 **data, u32 data_len, u32 *max_size, u8 data_offset, Bool skip_if_larger, u8 **out_comp_data, Bool use_gz)
 {
 	z_stream stream;
 	int err;
 	char *dest = (char *)gf_malloc(sizeof(char)*data_len*ZLIB_COMPRESS_SAFE);
-	stream.next_in = (Bytef*)(*data) ;
-	stream.avail_in = (uInt)data_len ;
+	stream.next_in = (Bytef*)(*data) + data_offset;
+	stream.avail_in = (uInt)data_len - data_offset;
 	stream.next_out = ( Bytef*)dest;
 	stream.avail_out = (uInt)data_len*ZLIB_COMPRESS_SAFE;
 	stream.zalloc = (alloc_func)NULL;
 	stream.zfree = (free_func)NULL;
 	stream.opaque = (voidpf)NULL;
 
-	err = deflateInit(&stream, 9);
+	if (use_gz) {
+		err = deflateInit2(&stream, 9, Z_DEFLATED, 16+MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
+	} else {
+		err = deflateInit(&stream, 9);
+	}
+
 	if (err != Z_OK) {
 		gf_free(dest);
 		return GF_IO_ERR;
@@ -212,8 +213,18 @@ GF_Err gf_gz_compress_payload(char **data, u32 data_len, u32 *max_size)
 		gf_free(dest);
 		return GF_IO_ERR;
 	}
-	if (data_len <stream.total_out) {
-		GF_LOG(GF_LOG_WARNING, GF_LOG_CORE, ("[GZ] compressed data (%d) larger than input (%d)\n", (u32) stream.total_out, (u32) data_len ));
+	if (data_len-data_offset < stream.total_out) {
+		if (skip_if_larger) {
+			gf_free(dest);
+			deflateEnd(&stream);
+			*max_size = (u32) stream.total_out;
+			return GF_OK;
+		}
+		GF_LOG(GF_LOG_INFO, GF_LOG_CORE, ("[GZ] compressed data (%d) larger than input (%d)\n", (u32) stream.total_out, (u32) data_len ));
+	}
+
+	if (out_comp_data) {
+		data = out_comp_data;
 	}
 
 	if (*max_size < stream.total_out) {
@@ -230,15 +241,27 @@ GF_Err gf_gz_compress_payload(char **data, u32 data_len, u32 *max_size)
 }
 
 GF_EXPORT
-GF_Err gf_gz_decompress_payload(char *data, u32 data_len, char **uncompressed_data, u32 *out_size)
+GF_Err gf_gz_compress_payload(u8 **data, u32 data_len, u32 *max_size)
+{
+	return gf_gz_compress_payload_ex(data, data_len, max_size, 0, GF_FALSE, NULL, GF_FALSE);
+}
+
+GF_EXPORT
+GF_Err gf_gz_decompress_payload_ex(u8 *data, u32 data_len, u8 **uncompressed_data, u32 *out_size, Bool use_gz)
 {
 	z_stream d_stream;
 	GF_Err e = GF_OK;
 	int err;
+	Bool owns_buffer=GF_TRUE;
 	u32 size = 4096;
 
-	*uncompressed_data = (char*)gf_malloc(sizeof(char)*4096);
-	if (!*uncompressed_data) return GF_OUT_OF_MEM;
+	if (! *uncompressed_data) {
+		*uncompressed_data = (char*)gf_malloc(sizeof(char)*4096);
+		if (!*uncompressed_data) return GF_OUT_OF_MEM;
+	} else {
+		owns_buffer = GF_FALSE;
+		size = *out_size;
+	}
 
 	d_stream.zalloc = (alloc_func)0;
 	d_stream.zfree = (free_func)0;
@@ -246,35 +269,211 @@ GF_Err gf_gz_decompress_payload(char *data, u32 data_len, char **uncompressed_da
 	d_stream.next_in  = (Bytef*)data;
 	d_stream.avail_in = data_len;
 	d_stream.next_out = (Bytef*) *uncompressed_data;
-	d_stream.avail_out = 4096;
+	d_stream.avail_out = size;
 
-	err = inflateInit(&d_stream);
+	if (use_gz) {
+		err = inflateInit2(&d_stream, 16+MAX_WBITS);
+	} else {
+		err = inflateInit(&d_stream);
+	}
+
 	if (err == Z_OK) {
 		while (d_stream.total_in < data_len) {
 			err = inflate(&d_stream, Z_NO_FLUSH);
-			if (err < Z_OK) {
+			if (err < Z_OK || err == Z_NEED_DICT) {
 				e = GF_NON_COMPLIANT_BITSTREAM;
 				break;
 			}
 			if (err==Z_STREAM_END) break;
 
-			size *= 2;
-			*uncompressed_data = (char*)gf_realloc(*uncompressed_data, sizeof(char)*size);
+			if (d_stream.total_out / ZLIB_INFLATE_MAX_MULTIPLIER > data_len) {
+				e = GF_NON_COMPLIANT_BITSTREAM;
+				GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[zlib] uncompressed data size is larger than %u times input data size (%u)\n", (u32) ZLIB_INFLATE_MAX_MULTIPLIER, (u32) data_len ));
+				break;
+			}
+
+			if (size >= GF_UINT_MAX/2 - 1)
+				size = GF_UINT_MAX - 1;
+			else
+				size *= 2;
+
+			*uncompressed_data = (char*)gf_realloc(*uncompressed_data, sizeof(char)*(size+1));
 			if (!*uncompressed_data) return GF_OUT_OF_MEM;
 			d_stream.avail_out = (u32) (size - d_stream.total_out);
 			d_stream.next_out = (Bytef*) ( *uncompressed_data + d_stream.total_out);
 		}
-		*out_size = (u32) d_stream.total_out;
+		*out_size = MIN( (size?size-1:0) , (u32) d_stream.total_out );
 		inflateEnd(&d_stream);
-		return e;
+		//force last byte to 0
+		(*uncompressed_data)[*out_size] = 0;
 	}
 	if (e!=GF_OK) {
-		gf_free(*uncompressed_data);
-		*uncompressed_data = NULL;
+		if (owns_buffer) {
+			gf_free(*uncompressed_data);
+			*uncompressed_data = NULL;
+		}
 	}
 	return e;
 }
+GF_EXPORT
+GF_Err gf_gz_decompress_payload(u8 *data, u32 data_len, u8 **uncompressed_data, u32 *out_size)
+{
+	return gf_gz_decompress_payload_ex(data, data_len, uncompressed_data, out_size, GF_FALSE);
+}
 
+#else
+GF_EXPORT
+GF_Err gf_gz_decompress_payload(u8 *data, u32 data_len, u8 **uncompressed_data, u32 *out_size)
+{
+	*out_size = 0;
+	return GF_NOT_SUPPORTED;
+}
+GF_EXPORT
+GF_Err gf_gz_decompress_payload_ex(u8 *data, u32 data_len, u8 **uncompressed_data, u32 *out_size, Bool no_hdr)
+{
+	*out_size = 0;
+	return GF_NOT_SUPPORTED;
+}
+GF_EXPORT
+GF_Err gf_gz_compress_payload(u8 **data, u32 data_len, u32 *max_size)
+{
+	*max_size = 0;
+	return GF_NOT_SUPPORTED;
+}
+GF_Err gf_gz_compress_payload_ex(u8 **data, u32 data_len, u32 *max_size, u8 data_offset, Bool skip_if_larger, u8 **out_comp_data, Bool no_header)
+{
+	*max_size = 0;
+	return GF_NOT_SUPPORTED;
+}
 #endif /*GPAC_DISABLE_ZLIB*/
 
-#endif /* GPAC_DISABLE_CORE_TOOLS*/
+
+#ifdef GPAC_HAS_LZMA
+
+#include <lzma.h>
+
+#define LZMA_COMPRESS_SAFE	2
+
+GF_EXPORT
+GF_Err gf_lz_compress_payload(u8 **data, u32 data_len, u32 *max_size)
+{
+	u32 block_size, comp_size;
+	lzma_options_lzma opt_lzma2;
+	lzma_stream strm = LZMA_STREAM_INIT;
+
+	lzma_lzma_preset(&opt_lzma2, LZMA_PRESET_DEFAULT);
+	lzma_filter filters[] = {
+			{ .id = LZMA_FILTER_X86, .options = NULL },
+			{ .id = LZMA_FILTER_LZMA2, .options = &opt_lzma2 },
+			{ .id = LZMA_VLI_UNKNOWN, .options = NULL },
+	};
+	lzma_ret ret = lzma_stream_encoder(&strm, filters, LZMA_CHECK_NONE);
+	if (ret != LZMA_OK) return GF_IO_ERR;
+
+	block_size = data_len*LZMA_COMPRESS_SAFE;
+	if (block_size < 64) block_size = 64;
+	char *dest = (char *)gf_malloc(sizeof(char)*block_size);
+
+
+	strm.next_in = (const uint8_t *) (*data);
+	strm.avail_in = data_len;
+	strm.next_out = (uint8_t *) dest;
+	strm.avail_out = block_size;
+
+	ret = lzma_code(&strm, LZMA_FINISH);
+	if ((ret != LZMA_OK) && (ret != LZMA_STREAM_END)) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[LZMA] compressed data failure, code %d\n", ret ));
+		return GF_IO_ERR;
+	}
+	comp_size = block_size - strm.avail_out;
+
+	if (data_len < comp_size) {
+		GF_LOG(GF_LOG_INFO, GF_LOG_CORE, ("[LZMA] compressed data (%d) larger than input (%d)\n", (u32) comp_size, (u32) data_len ));
+	}
+
+	if (*max_size < comp_size) {
+		*max_size = block_size;
+		*data = (char*)gf_realloc(*data, block_size * sizeof(char));
+	}
+
+	memcpy((*data) , dest, sizeof(char) * comp_size);
+	*max_size = (u32) comp_size;
+	gf_free(dest);
+
+	lzma_end(&strm);
+	return GF_OK;
+}
+
+GF_EXPORT
+GF_Err gf_lz_decompress_payload(u8 *data, u32 data_len, u8 **uncompressed_data, u32 *out_size)
+{
+	lzma_stream strm = LZMA_STREAM_INIT;
+	lzma_ret ret = lzma_stream_decoder(&strm, UINT64_MAX, 0);
+	if (ret != LZMA_OK) return GF_IO_ERR;
+
+	Bool owns_buffer=GF_TRUE;
+	u32 block_size = 4096;
+	u32 done = 0;
+	u32 alloc_size = 0;
+	u8 *block = gf_malloc(4096);
+	if (!block) return GF_OUT_OF_MEM;
+	u8 *dst_buffer = NULL;
+
+	if (*uncompressed_data) {
+		owns_buffer = GF_FALSE;
+		dst_buffer = (u8 *) *uncompressed_data;
+		alloc_size = *out_size;
+	} else {
+		*out_size = 0;
+	}
+
+	strm.next_in = (const uint8_t *) data;
+	strm.avail_in = data_len;
+	strm.next_out = (uint8_t *) block;
+	strm.avail_out = block_size;
+
+	while (1) {
+		ret = lzma_code(&strm, LZMA_FINISH);
+
+		if ((strm.avail_out == 0) || (ret == LZMA_STREAM_END)) {
+			u32 uncomp_size = block_size - strm.avail_out;
+
+			if (done + uncomp_size > alloc_size) {
+				alloc_size = done + uncomp_size;
+				dst_buffer = gf_realloc(dst_buffer, alloc_size);
+				*out_size = alloc_size;
+			}
+			memcpy(dst_buffer + done, block, uncomp_size);
+			done += uncomp_size;
+
+			strm.next_out = (uint8_t *) block;
+			strm.avail_out = block_size;
+		}
+		if (ret == LZMA_STREAM_END) break;
+		if (ret != LZMA_OK) {
+			GF_LOG(GF_LOG_WARNING, GF_LOG_CORE, ("[LZMA] error decompressing data: %d\n", ret ));
+			if (owns_buffer) gf_free(dst_buffer);
+			gf_free(block);
+			return GF_IO_ERR;
+		}
+	}
+
+	*uncompressed_data = dst_buffer;
+	*out_size = done;
+	gf_free(block);
+	return GF_OK;
+}
+#else
+GF_EXPORT
+GF_Err gf_lz_decompress_payload(u8 *data, u32 data_len, u8 **uncompressed_data, u32 *out_size)
+{
+	*out_size = 0;
+	return GF_NOT_SUPPORTED;
+}
+GF_EXPORT
+GF_Err gf_lz_compress_payload(u8 **data, u32 data_len, u32 *max_size)
+{
+	*max_size = 0;
+	return GF_NOT_SUPPORTED;
+}
+#endif /*GPAC_HAS_LZMA*/

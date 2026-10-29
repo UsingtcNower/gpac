@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2026
  *					All rights reserved
  *
  *  This file is part of GPAC / common tools sub-project
@@ -23,13 +23,14 @@
  *
  */
 
-#ifndef GPAC_DISABLE_CORE_TOOLS
-
-#ifdef GPAC_ANDROID
+#ifdef GPAC_CONFIG_ANDROID
 #include <jni.h>
 #endif
 
 #include <gpac/thread.h>
+
+#ifndef GPAC_DISABLE_THREADS
+
 
 #if defined(WIN32) || defined(_WIN32_WCE)
 
@@ -63,11 +64,15 @@ struct __tag_thread
 	void *args;
 	/* lock for signal */
 	GF_Semaphore *_signal;
+	Bool blocking;
+
+	Bool no_kill;
+
 #ifndef GPAC_DISABLE_LOG
 	u32 id;
 	char *log_name;
 #endif
-#ifdef GPAC_ANDROID
+#ifdef GPAC_CONFIG_ANDROID
 	u32 (*RunBeforeExit)(void *param);
 #endif
 };
@@ -76,10 +81,13 @@ struct __tag_thread
 #ifndef GPAC_DISABLE_LOG
 #include <gpac/list.h>
 static GF_List *thread_bank = NULL;
-
+static u32 main_th_id = 0;
 static void log_add_thread(GF_Thread *t)
 {
-	if (!thread_bank) thread_bank = gf_list_new();
+	if (!thread_bank) {
+		thread_bank = gf_list_new();
+		main_th_id = gf_th_id();
+	}
 	gf_list_add(thread_bank, t);
 }
 static void log_del_thread(GF_Thread *t)
@@ -90,17 +98,24 @@ static void log_del_thread(GF_Thread *t)
 		thread_bank = NULL;
 	}
 }
-static const char *log_th_name(u32 id)
+
+static const char *log_th_name(u32 id, char szName[100])
 {
 	u32 i, count;
 
 	if (!id) id = gf_th_id();
+	if (main_th_id == id) return "Main Process";
 	count = gf_list_count(thread_bank);
 	for (i=0; i<count; i++) {
 		GF_Thread *t = (GF_Thread*)gf_list_get(thread_bank, i);
 		if (t->id == id) return t->log_name;
 	}
-	return "Main Process";
+	sprintf(szName, "%u", id);
+	return szName;
+}
+const char *gf_th_log_name(GF_Thread *t)
+{
+	return t ? t->log_name : "Main Process";
 }
 
 #endif
@@ -109,9 +124,16 @@ static const char *log_th_name(u32 id)
 GF_EXPORT
 GF_Thread *gf_th_new(const char *name)
 {
+	if (gf_opts_get_bool("core", "no-mx")) return NULL;
+
 	GF_Thread *tmp = (GF_Thread*)gf_malloc(sizeof(GF_Thread));
 	memset(tmp, 0, sizeof(GF_Thread));
 	tmp->status = GF_THREAD_STATUS_STOP;
+#ifdef GPAC_CONFIG_EMSCRIPTEN
+	tmp->blocking = GF_FALSE;
+#else
+	tmp->blocking = GF_TRUE;
+#endif
 
 #ifndef GPAC_DISABLE_LOG
 	if (name) {
@@ -127,7 +149,7 @@ GF_Thread *gf_th_new(const char *name)
 }
 
 
-#ifdef GPAC_ANDROID
+#ifdef GPAC_CONFIG_ANDROID
 #include <pthread.h>
 
 static pthread_key_t currentThreadInfoKey = 0;
@@ -148,16 +170,21 @@ static void currentThreadInfoKey_alloc()
 {
 	int err;
 	/* We do not use any destructor */
-	if (err = pthread_key_create(&currentThreadInfoKey, NULL))
+	err = pthread_key_create(&currentThreadInfoKey, NULL);
+	if (err) {
 		GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex] pthread_key_create() failed with error %d\n", err));
+	}
 }
 
 GF_Thread * gf_th_current() {
 	return pthread_getspecific(currentThreadInfoKey);
 }
 
-#endif /* GPAC_ANDROID */
+#endif /* GPAC_CONFIG_ANDROID */
 
+#if defined(GPAC_CONFIG_EMSCRIPTEN) && !defined(GPAC_DISABLE_THREADS)
+#include <emscripten/eventloop.h>
+#endif
 
 #ifdef WIN32
 DWORD WINAPI RunThread(void *ptr)
@@ -170,18 +197,34 @@ void * RunThread(void *ptr)
 #endif
 	GF_Thread *t = (GF_Thread *)ptr;
 
+
+//not activated by default, not portable
+#if 0 && !defined(GPAC_DISABLE_LOG)
+	if (t->log_name) {
+#ifdef WIN32
+#elif defined(__DARWIN__) || defined(__APPLE__)
+		pthread_setname_np(t->log_name);
+#else
+		pthread_setname_np(t->threadH, t->log_name);
+#endif
+	}
+#endif
+
 	/* Signal the caller */
-	if (! t->_signal) goto exit;
-#ifdef GPAC_ANDROID
+	if (t->blocking && !t->_signal) goto exit;
+
+#ifdef GPAC_CONFIG_ANDROID
 	if (pthread_once(&currentThreadInfoKey_once, &currentThreadInfoKey_alloc) || pthread_setspecific(currentThreadInfoKey, t))
-		GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex] Couldn't run thread %s, ID 0x%08x\n", t->log_name, t->id));
-#endif /* GPAC_ANDROID */
+		GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex] Couldn't run thread %s, ID %u\n", t->log_name, t->id));
+#endif /* GPAC_CONFIG_ANDROID */
 	t->status = GF_THREAD_STATUS_RUN;
-	gf_sema_notify(t->_signal, 1);
+
+	if (t->blocking)
+		gf_sema_notify(t->_signal, 1);
 
 #ifndef GPAC_DISABLE_LOG
 	t->id = gf_th_id();
-	GF_LOG(GF_LOG_INFO, GF_LOG_MUTEX, ("[Thread %s] At %d Entering thread proc - thread ID 0x%08x\n", t->log_name, gf_sys_clock(), t->id));
+	GF_LOG(GF_LOG_INFO, GF_LOG_MUTEX, ("[Thread %s] At %d Entering thread proc - thread ID %u\n", t->log_name, gf_sys_clock(), t->id));
 #endif
 
 	/* Each thread has its own seed */
@@ -191,6 +234,18 @@ void * RunThread(void *ptr)
 	ret = t->Run(t->args);
 
 exit:
+
+	if (t->no_kill) {
+#if defined(GPAC_CONFIG_EMSCRIPTEN) && !defined(GPAC_DISABLE_THREADS)
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_MUTEX, ("[Thread %s] exit with no kill - unwinding to JS event loop\n", t->log_name));
+		emscripten_unwind_to_js_event_loop();
+		return (void *)ret;
+#elif defined(WIN32)
+		return ret;
+#else
+		return (void *)ret;
+#endif
+	}
 #ifndef GPAC_DISABLE_LOG
 	GF_LOG(GF_LOG_INFO, GF_LOG_MUTEX, ("[Thread %s] At %d Exiting thread proc, return code %d\n", t->log_name, gf_sys_clock(), ret));
 #endif
@@ -205,13 +260,13 @@ exit:
 	return ret;
 #else
 
-#ifdef GPAC_ANDROID
+#ifdef GPAC_CONFIG_ANDROID
 #ifndef GPAC_DISABLE_LOG
 	GF_LOG(GF_LOG_INFO, GF_LOG_MUTEX, ("[Thread %s] RunBeforeExit=%p\n", t->log_name, t->RunBeforeExit));
 #endif
 	if (t->RunBeforeExit)
 		t->RunBeforeExit(t->args);
-#endif /* GPAC_ANDROID */
+#endif /* GPAC_CONFIG_ANDROID */
 	pthread_exit((void *)0);
 	return (void *)ret;
 #endif
@@ -225,13 +280,15 @@ GF_Err gf_th_run(GF_Thread *t, u32 (*Run)(void *param), void *param)
 #else
 	pthread_attr_t att;
 #endif
-	if (!t || t->Run || t->_signal) return GF_BAD_PARAM;
+	if (!t || t->Run || t->_signal) {
+		return GF_BAD_PARAM;
+	}
 	t->Run = Run;
 	t->args = param;
-	t->_signal = gf_sema_new(1, 0);
-
-	if (!t->_signal)
-		return GF_IO_ERR;
+	if (t->blocking) {
+		t->_signal = gf_sema_new(1, 0);
+		if (!t->_signal) return GF_IO_ERR;
+	}
 
 	GF_LOG(GF_LOG_INFO, GF_LOG_MUTEX, ("[Thread %s] Starting\n", t->log_name));
 
@@ -268,14 +325,27 @@ GF_Err gf_th_run(GF_Thread *t, u32 (*Run)(void *param), void *param)
 		return GF_IO_ERR;
 	}
 
-	/*wait for the child function to call us - do NOT return before, otherwise the thread status would
-	be unknown*/
-	gf_sema_wait(t->_signal);
-	gf_sema_del(t->_signal);
-	t->_signal = NULL;
+	if (t->blocking) {
+		/*wait for the child function to call us - do NOT return before, otherwise the thread status would be unknown*/
+		gf_sema_wait(t->_signal);
+		gf_sema_del(t->_signal);
+		t->_signal = NULL;
+	}
 	GF_LOG(GF_LOG_INFO, GF_LOG_MUTEX, ("[Thread %s] Started\n", t->log_name));
 	return GF_OK;
 }
+
+#if defined(GPAC_CONFIG_EMSCRIPTEN) && !defined(GPAC_DISABLE_THREADS)
+#include <emscripten/threading.h>
+
+GF_Err gf_th_async_call(GF_Thread *t, u32 (*Run)(void *param), void *param)
+{
+	t->no_kill = 1;
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_MUTEX, ("[Thread %s] async EM call\n", t->log_name));
+	emscripten_dispatch_to_thread_async_(t->threadH, EM_FUNC_SIG_II, Run, NULL, param);
+	return GF_OK;
+}
+#endif
 
 
 /* Stops a thread. If Destroy is not 0, thread is destroyed DANGEROUS as no cleanup */
@@ -296,7 +366,7 @@ void Thread_Stop(GF_Thread *t, Bool Destroy)
 		}
 #else
 		if (Destroy) {
-#if defined(GPAC_ANDROID) || defined(PTHREAD_HAS_NO_CANCEL)
+#if defined(GPAC_CONFIG_ANDROID) || defined(PTHREAD_HAS_NO_CANCEL)
 			if (pthread_kill(t->threadH, SIGQUIT))
 #else
 			if (pthread_cancel(t->threadH))
@@ -305,8 +375,19 @@ void Thread_Stop(GF_Thread *t, Bool Destroy)
 			t->threadH = 0;
 		} else {
 			/*gracefully wait for Run to finish*/
+#ifdef GPAC_CONFIG_EMSCRIPTEN
+			//only destroy if in main application thread (otherwise emscripten assert on cleanupThread()  fails)
+			if (emscripten_is_main_runtime_thread()) {
+				int pthread_tryjoin_np(pthread_t, void **);
+				void *rval=NULL;
+				if (!t->no_kill && pthread_tryjoin_np(t->threadH, &rval))
+					GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Thread %s] pthread_join() returned an error with thread ID 0x%08x\n", t->log_name, t->id));
+			}
+#else
 			if (pthread_join(t->threadH, NULL))
 				GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Thread %s] pthread_join() returned an error with thread ID 0x%08x\n", t->log_name, t->id));
+#endif
+
 		}
 #endif
 	}
@@ -316,7 +397,7 @@ void Thread_Stop(GF_Thread *t, Bool Destroy)
 GF_EXPORT
 void gf_th_stop(GF_Thread *t)
 {
-	Thread_Stop(t, GF_FALSE);
+	if (t) Thread_Stop(t, GF_FALSE);
 }
 
 GF_EXPORT
@@ -339,7 +420,7 @@ void gf_th_del(GF_Thread *t)
 	gf_free(t);
 }
 
-
+GF_EXPORT
 void gf_th_set_priority(GF_Thread *t, s32 priority)
 {
 #ifdef WIN32
@@ -380,7 +461,7 @@ void gf_th_set_priority(GF_Thread *t, s32 priority)
 	}
 #endif
 
-#else
+#elif !defined(GPAC_CONFIG_EMSCRIPTEN)
 
 	struct sched_param s_par;
 	if (!t) return;
@@ -399,6 +480,7 @@ void gf_th_set_priority(GF_Thread *t, s32 priority)
 #endif
 }
 
+GF_EXPORT
 u32 gf_th_status(GF_Thread *t)
 {
 	if (!t) return 0;
@@ -429,9 +511,11 @@ struct __tag_mutex
 #endif
 	/* We filter recursive calls (1 thread calling Lock several times in a row only locks
 	ONCE the mutex. Holder is the current ThreadID of the mutex holder*/
-	u32 Holder, HolderCount;
+	volatile u32 Holder;
+	u32 HolderCount;
 #ifndef GPAC_DISABLE_LOG
 	char *log_name;
+	Bool nolog;
 #endif
 };
 
@@ -439,6 +523,8 @@ struct __tag_mutex
 GF_EXPORT
 GF_Mutex *gf_mx_new(const char *name)
 {
+	if (gf_opts_get_bool("core", "no-mx")) return NULL;
+
 #ifndef WIN32
 	pthread_mutexattr_t attr;
 #endif
@@ -460,17 +546,19 @@ GF_Mutex *gf_mx_new(const char *name)
 
 #ifndef GPAC_DISABLE_LOG
 	if (name) {
-		tmp->log_name = gf_strdup(name);
+		if (stricmp(name, "Logs")) {
+			tmp->log_name = gf_strdup(name);
+		}
 	} else {
 		char szN[20];
 		sprintf(szN, "%p", (void*)tmp);
 		tmp->log_name = gf_strdup(szN);
 	}
-	assert( tmp->log_name);
 #endif
 
 	return tmp;
 }
+
 
 GF_EXPORT
 void gf_mx_del(GF_Mutex *mx)
@@ -478,27 +566,56 @@ void gf_mx_del(GF_Mutex *mx)
 #ifndef WIN32
 	int err;
 #endif
-	
-	if (mx->Holder) {
-		GF_LOG(GF_LOG_WARNING, GF_LOG_MUTEX, ("[Mutex %s] Destroying mutex from thread %s but hold by thread %s\n", mx->log_name, log_th_name(gf_th_id() ), log_th_name(mx->Holder) ));
+	if (!mx) return;
+#ifndef GPAC_DISABLE_LOG
+	if (mx->Holder && (gf_th_id() != mx->Holder) && mx->log_name) {
+		char szName1[100], szName2[100];
+		GF_LOG(GF_LOG_WARNING, GF_LOG_MUTEX, ("[Mutex %s] Destroying mutex from thread %s but hold by thread %s\n", mx->log_name, log_th_name(gf_th_id(), szName1), log_th_name(mx->Holder, szName2) ));
 	}
-	
+#endif
+
 #ifdef WIN32
 	if (!CloseHandle(mx->hMutex)) {
-		DWORD err = GetLastError();
-		GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex %s] CloseHandle when deleting mutex failed with error code %d\n", mx->log_name, err));
+#ifndef GPAC_DISABLE_LOG
+		if (mx->log_name) {
+			DWORD err = GetLastError();
+			GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex %s] CloseHandle when deleting mutex failed with error code %d\n", mx->log_name, err));
+		}
+#endif
 	}
 #else
+	int max_retries = 10;
+retry:
 	err = pthread_mutex_destroy(&mx->hMutex);
-	if (err)
-		GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex %s] pthread_mutex_destroy failed with error code %d\n", mx->log_name, err));
+	if (err == EBUSY && max_retries > 0) {
+		gf_sleep(10);
+		max_retries--;
+		goto retry;
+	}
+	if (err) {
+#ifndef GPAC_DISABLE_LOG
+		if (mx->log_name) {
+			GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex %s] pthread_mutex_destroy failed with error code %d\n", mx->log_name, err));
+		}
+#endif
+	}
 
 #endif
 #ifndef GPAC_DISABLE_LOG
-	gf_free(mx->log_name);
-	mx->log_name = NULL;
+	if (mx->log_name) {
+		gf_free(mx->log_name);
+		mx->log_name = NULL;
+	}
 #endif
 	gf_free(mx);
+}
+
+void gf_mx_toggle_log(GF_Mutex *mx, Bool nolog)
+{
+#ifndef GPAC_DISABLE_LOG
+	if (mx)
+		mx->nolog = nolog;
+#endif
 }
 
 GF_EXPORT
@@ -509,27 +626,47 @@ void gf_mx_v(GF_Mutex *mx)
 	caller = gf_th_id();
 
 	/*only if we own*/
-	assert(caller == mx->Holder);
-	if (caller != mx->Holder) return;
-	assert(mx->HolderCount > 0);
+	if (caller != mx->Holder) {
+		gf_fatal_assert(0);
+		return;
+	}
+	gf_fatal_assert(mx->HolderCount > 0);
 	mx->HolderCount -= 1;
 
 	if (mx->HolderCount == 0) {
-#ifndef GPAC_DISABLE_LOG
-		GF_LOG(GF_LOG_DEBUG, GF_LOG_MUTEX, ("[Mutex %s] At %d Released by thread %s\n", mx->log_name, gf_sys_clock(), log_th_name(mx->Holder) ));
-#endif
 		mx->Holder = 0;
+		gf_fatal_assert(mx->HolderCount == 0);
 #ifdef WIN32
 		{
 			BOOL ret = ReleaseMutex(mx->hMutex);
 			if (!ret) {
-				DWORD err = GetLastError();
-				GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex] Couldn't release mutex (thread %s, error %d)\n", log_th_name(mx->Holder), err));
+#ifndef GPAC_DISABLE_LOG
+				if (mx->log_name && !mx->nolog) {
+					char szName[100];
+					DWORD err = GetLastError();
+					GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex] Couldn't release mutex (thread %s, error %d)\n", log_th_name(mx->Holder, szName), err));
+				}
+#endif
+				return;
 			}
 		}
 #else
-		if (pthread_mutex_unlock(&mx->hMutex))
-			GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex] Couldn't release mutex (thread %s)\n", log_th_name(mx->Holder)));
+		if (pthread_mutex_unlock(&mx->hMutex)) {
+#ifndef GPAC_DISABLE_LOG
+			if (mx->log_name && !mx->nolog) {
+				char szName[100];
+				GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex] Couldn't release mutex (thread %s)\n", log_th_name(mx->Holder, szName)));
+			}
+#endif
+			return;
+		}
+#endif
+
+#ifndef GPAC_DISABLE_LOG
+		if (mx->log_name && !mx->nolog) {
+			char szName[100];
+			GF_LOG(GF_LOG_DEBUG, GF_LOG_MUTEX, ("[Mutex %s] Released by thread %s (hcount %u)\n", mx->log_name, log_th_name(mx->Holder, szName), mx->HolderCount ));
+		}
 #endif
 	}
 }
@@ -540,21 +677,26 @@ u32 gf_mx_p(GF_Mutex *mx)
 #ifndef WIN32
 	int retCode;
 #endif
-#ifndef GPAC_DISABLE_LOG
-	const char *mx_holder_name = mx->Holder ? log_th_name(mx->Holder) : "none";
-#endif
 	u32 caller;
-	assert(mx);
-	if (!mx) return 0;
+#ifndef GPAC_DISABLE_LOG
+	const char *mx_holder_name;
+#endif
+
+	if (!mx) return 1;
 	caller = gf_th_id();
 	if (caller == mx->Holder) {
+		gf_fatal_assert(mx->HolderCount > 0);
+		gf_fatal_assert(mx->Holder);
 		mx->HolderCount += 1;
 		return 1;
 	}
 
 #ifndef GPAC_DISABLE_LOG
-	if (mx->Holder)
-		GF_LOG(GF_LOG_DEBUG, GF_LOG_MUTEX, ("[Mutex %s] At %d Thread %s waiting a release from thread %s\n", mx->log_name, gf_sys_clock(), log_th_name(caller), mx_holder_name ));
+	if (mx->Holder && mx->log_name && !mx->nolog) {
+		char szName[100];
+		mx_holder_name = mx->Holder ? log_th_name(mx->Holder, szName) : "none";
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_MUTEX, ("[Mutex %s] Thread %s waiting a release from thread %s (hcount %d)\n", mx->log_name, log_th_name(caller, szName), mx_holder_name, mx->HolderCount ));
+	}
 #endif
 
 #ifdef WIN32
@@ -567,24 +709,39 @@ u32 gf_mx_p(GF_Mutex *mx)
 	}
 #else
 	retCode = pthread_mutex_lock(&mx->hMutex);
-	if (retCode != 0 ) {
+	if (retCode != 0) {
 #ifndef GPAC_DISABLE_LOG
+		char name[100] = {0};
+		if (mx->log_name)
+			gf_strcpy(name, mx->log_name);
+		else
+			sprintf(name, "id=%u", gf_th_id());
+
 		if (retCode == EINVAL)
-			GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex %p=%s] Not properly initialized.\n", mx, mx->log_name));
+			GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex %p:%s] Not properly initialized.\n", mx, name));
 		if (retCode == EDEADLK)
-			GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex %p=%s] Deadlock detected.\n", mx, mx->log_name));
+			GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex %p:%s] Deadlock detected.\n", mx, name));
 #endif /* GPAC_DISABLE_LOG */
-		assert(0);
+		gf_assert(0);
 		return 0;
 	}
 #endif /* NOT WIN32 */
+	gf_assert(mx->Holder == 0);
+	gf_assert(mx->HolderCount == 0);
 	mx->HolderCount = 1;
 	mx->Holder = caller;
-	GF_LOG(GF_LOG_DEBUG, GF_LOG_MUTEX, ("[Mutex %s] At %d Grabbed by thread %s\n", mx->log_name, gf_sys_clock(), log_th_name(mx->Holder) ));
+	gf_fatal_assert(mx->Holder);
+#ifndef GPAC_DISABLE_LOG
+	if (mx->log_name && !mx->nolog) {
+		char szName[100];
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_MUTEX, ("[Mutex %s] Grabbed by thread %s\n", mx->log_name, log_th_name(mx->Holder, szName) ));
+	}
+#endif
 	return 1;
 }
 
 
+GF_EXPORT
 s32 gf_mx_get_num_locks(GF_Mutex *mx)
 {
 	u32 caller;
@@ -600,12 +757,18 @@ GF_EXPORT
 Bool gf_mx_try_lock(GF_Mutex *mx)
 {
 	u32 caller;
-	if (!mx) return GF_FALSE;
+	if (!mx) {
+		return GF_TRUE;
+	}
 	caller = gf_th_id();
 	if (caller == mx->Holder) {
+		gf_fatal_assert(mx->HolderCount > 0);
+		gf_fatal_assert(mx->Holder);
 		mx->HolderCount += 1;
 		return GF_TRUE;
 	}
+
+	//DO NOT LOG ANYTHING BEFORE RELEASING, this will break logging with mutex@debug in JS where we use try_lock
 
 #ifdef WIN32
 	/*is the object signaled?*/
@@ -614,24 +777,47 @@ Bool gf_mx_try_lock(GF_Mutex *mx)
 		break;
 	case WAIT_ABANDONED:
 	case WAIT_TIMEOUT:
-		GF_LOG(GF_LOG_DEBUG, GF_LOG_MUTEX, ("[Mutex %s] At %d Couldn't be locked by thread %s (grabbed by thread %s)\n", mx->log_name, gf_sys_clock(), log_th_name(caller), log_th_name(mx->Holder) ));
+#ifndef GPAC_DISABLE_LOG
+		if (mx->log_name) {
+			char szName1[100], szName2[100];
+			GF_LOG(GF_LOG_DEBUG, GF_LOG_MUTEX, ("[Mutex %s] At %d Couldn't be locked by thread %s (grabbed by thread %s)\n", mx->log_name, gf_sys_clock(), log_th_name(caller, szName1), log_th_name(mx->Holder, szName2) ));
+		}
+#endif
 		return GF_FALSE;
 	case WAIT_FAILED:
-		GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex %s] At %d WaitForSingleObject failed\n", mx->log_name, gf_sys_clock()));
+#ifndef GPAC_DISABLE_LOG
+		if (mx->log_name) {
+			GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Mutex %s] At %d WaitForSingleObject failed\n", mx->log_name, gf_sys_clock()));
+		}
+#endif
 		return GF_FALSE;
 	default:
-		assert(0);
+		gf_assert(0);
 		return GF_FALSE;
 	}
 #else
 	if (pthread_mutex_trylock(&mx->hMutex) != 0 ) {
-		GF_LOG(GF_LOG_DEBUG, GF_LOG_MUTEX, ("[Mutex %s] At %d Couldn't release it for thread %s (grabbed by thread %s)\n", mx->log_name, gf_sys_clock(), log_th_name(caller), log_th_name(mx->Holder) ));
+#ifndef GPAC_DISABLE_LOG
+		if (mx->log_name) {
+			char szName1[100], szName2[100];
+			GF_LOG(GF_LOG_DEBUG, GF_LOG_MUTEX, ("[Mutex %s] Couldn't release it for thread %s (grabbed by thread %s)\n", mx->log_name, log_th_name(caller, szName1), log_th_name(mx->Holder, szName2) ));
+		}
+#endif
 		return GF_FALSE;
 	}
 #endif
-	mx->Holder = caller;
+	gf_assert(mx->Holder == 0);
+	gf_assert(mx->HolderCount == 0);
 	mx->HolderCount = 1;
-	GF_LOG(GF_LOG_DEBUG, GF_LOG_MUTEX, ("[Mutex %s] At %d Grabbed by thread %s\n", mx->log_name, gf_sys_clock(), log_th_name(mx->Holder) ));
+	mx->Holder = caller;
+	gf_assert(mx->Holder);
+	gf_assert(mx->HolderCount);
+#ifndef GPAC_DISABLE_LOG
+	if (mx->log_name) {
+		char szName[100];
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_MUTEX, ("[Mutex %s] Grabbed by thread %s\n", mx->log_name, log_th_name(mx->Holder, szName) ));
+	}
+#endif
 	return GF_TRUE;
 }
 
@@ -655,13 +841,17 @@ struct __tag_semaphore
 GF_EXPORT
 GF_Semaphore *gf_sema_new(u32 MaxCount, u32 InitCount)
 {
+	if (gf_opts_get_bool("core", "no-mx")) return NULL;
+
 	GF_Semaphore *tmp = (GF_Semaphore*)gf_malloc(sizeof(GF_Semaphore));
 	if (!tmp) {
 		GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("Couldn't allocate semaphore\n"));
 		return NULL;
 	}
+
 #if defined(WIN32)
-	tmp->hSemaphore = CreateSemaphore(NULL, InitCount, MaxCount, NULL);
+	MaxCount = MIN(MaxCount, GF_INT_MAX);
+	tmp->hSemaphore = CreateSemaphore(NULL, InitCount, MIN(MaxCount, GF_INT_MAX), NULL);
 	if (!tmp->hSemaphore) {
 		GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("Couldn't create semaphore\n"));
 		gf_free(tmp);
@@ -676,9 +866,11 @@ GF_Semaphore *gf_sema_new(u32 MaxCount, u32 InitCount)
 	*/
 	{
 		char semaName[40];
-		sprintf(semaName,"GPAC_SEM%ld", (unsigned long) tmp);
+		u64 add = (u64) tmp ^ gf_net_get_utc() ^ gf_rand();
+		sprintf(semaName,"GPAC_SEM"LLU, add);
 		tmp->SemName = gf_strdup(semaName);
 	}
+	sem_unlink(tmp->SemName);
 	tmp->hSemaphore = sem_open(tmp->SemName, O_CREAT, S_IRUSR|S_IWUSR, InitCount);
 	if (tmp->hSemaphore==SEM_FAILED) {
 		GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("Couldn't init semaphore: error %d\n", errno));
@@ -699,6 +891,7 @@ GF_Semaphore *gf_sema_new(u32 MaxCount, u32 InitCount)
 GF_EXPORT
 void gf_sema_del(GF_Semaphore *sm)
 {
+	if (!sm) return;
 #if defined(WIN32)
 	if (!CloseHandle(sm->hSemaphore)) {
 		DWORD err = GetLastError();
@@ -720,7 +913,7 @@ Bool gf_sema_notify(GF_Semaphore *sm, u32 NbRelease)
 #ifndef WIN32
 	sem_t *hSem;
 #else
-	u32 prevCount;
+	u32 prevCount=0;
 #endif
 
 	if (!sm) return GF_FALSE;
@@ -729,11 +922,7 @@ Bool gf_sema_notify(GF_Semaphore *sm, u32 NbRelease)
 	ReleaseSemaphore(sm->hSemaphore, NbRelease, (LPLONG) &prevCount);
 #else
 
-#if defined(__DARWIN__) || defined(__APPLE__)
 	hSem = sm->hSemaphore;
-#else
-	hSem = sm->hSemaphore;
-#endif
 
 	while (NbRelease) {
 		if (sem_post(hSem) < 0) return GF_FALSE;
@@ -744,45 +933,78 @@ Bool gf_sema_notify(GF_Semaphore *sm, u32 NbRelease)
 }
 
 GF_EXPORT
-void gf_sema_wait(GF_Semaphore *sm)
+Bool gf_sema_wait(GF_Semaphore *sm)
 {
+	if (!sm) return GF_FALSE;
 #ifdef WIN32
-	WaitForSingleObject(sm->hSemaphore, INFINITE);
-#elif defined (__DARWIN__) || defined(__APPLE__)
-	if (sem_wait(sm->hSemaphore)) {
-		GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Semaphore] failed to wait for semaphore %s: %d\n", sm->SemName, errno));
+	switch (WaitForSingleObject(sm->hSemaphore, INFINITE) ) {
+	case WAIT_FAILED:
+		GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Semaphore] failed to wait: %d\n", GetLastError() ));
+		return GF_FALSE;
+	case WAIT_ABANDONED:
+		GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Semaphore] failed to wait: owner thread exit\n"));
+		return GF_FALSE;
+	default:
+		break;
 	}
+
 #else
-	if (sem_wait(sm->hSemaphore)) {
+retry:
+	if (sem_wait(sm->hSemaphore) < 0) {
+		if (errno == EINTR) goto retry;
 		GF_LOG(GF_LOG_ERROR, GF_LOG_MUTEX, ("[Semaphore] failed to wait for semaphore: %d\n", errno));
+		return GF_FALSE;
 	}
 #endif
+	return GF_TRUE;
 }
 
 GF_EXPORT
 Bool gf_sema_wait_for(GF_Semaphore *sm, u32 TimeOut)
 {
 #ifdef WIN32
+	if (!sm) return GF_FALSE;
 	if (WaitForSingleObject(sm->hSemaphore, TimeOut) == WAIT_TIMEOUT) return GF_FALSE;
 	return GF_TRUE;
 #else
 	sem_t *hSem;
-#if defined(__DARWIN__) || defined(__APPLE__)
+	if (!sm) return GF_FALSE;
 	hSem = sm->hSemaphore;
-#else
-	hSem = sm->hSemaphore;
-#endif
+
 	if (!TimeOut) {
 		if (!sem_trywait(hSem)) return GF_TRUE;
 		return GF_FALSE;
 	}
+
+#if defined(__DARWIN__) || defined(__APPLE__) || defined(GPAC_CONFIG_IOS) || defined(GPAC_CONFIG_EMSCRIPTEN)
+
 	TimeOut += gf_sys_clock();
 	do {
 		if (!sem_trywait(hSem)) return GF_TRUE;
+		//OSX/ios don't support sem_timedwait, so we sleep until the sem is notified or the timeout is done
+		//don't be too greedy, use 5ms sleep
+		//another approach would be to spawn a thread, use sem_wait and send an interrupt on the sema after the timeout ...
 		gf_sleep(1);
 	} while (gf_sys_clock() < TimeOut);
 	return GF_FALSE;
+#else
+	struct timespec tv;
+	u32 secs;
+	if (clock_gettime(CLOCK_REALTIME, &tv) == -1) return GF_FALSE;
+	secs = TimeOut/1000;
+	tv.tv_sec += secs;
+	tv.tv_nsec += (u64) ((TimeOut-secs*1000)) * 1000000;
+	if (tv.tv_nsec>1000000000) {
+		tv.tv_nsec -= 1000000000;
+		tv.tv_sec += 1;
+	}
+	if (!sem_timedwait(hSem, &tv)) return GF_TRUE;
+
+	return GF_FALSE;
+#endif
+
 #endif
 }
 
-#endif
+
+#endif //GPAC_DISABLE_THREADS

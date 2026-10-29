@@ -1,8 +1,8 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Cyril Concolato
- *			Copyright (c) Telecom ParisTech 2010-2012
+ *			Authors: Cyril Concolato, Jean Le Feuvre
+ *			Copyright (c) Telecom ParisTech 2010-2023
  *			All rights reserved
  *
  *  This file is part of GPAC / Test Suite Validator Recorder sub-project
@@ -23,24 +23,23 @@
  *
  */
 
-#include <gpac/modules/term_ext.h>
-#include <gpac/internal/terminal_dev.h>
+#include <gpac/modules/compositor_ext.h>
+#include <gpac/filters.h>
 #include <gpac/internal/compositor_dev.h>
 #include <gpac/internal/media_dev.h>
 #include <gpac/xml.h>
-#include <gpac/options.h>
+
+#ifndef GPAC_DISABLE_COMPOSITOR
 
 typedef struct __validation_module
 {
-	GF_Terminal *term;
+	GF_Compositor *compositor;
 
 	Bool is_recording;
 	Bool trace_mode;
-	char *prev_fps;
-	char *prev_alias;
 
 	/* Clock used to synchronize events in recording and playback*/
-	GF_Clock *ck;
+	GF_ObjectManager *root_odm;
 
 	/* Next event to process */
 	Bool next_event_snapshot;
@@ -72,7 +71,7 @@ typedef struct __validation_module
 	Bool snapshot_next_frame;
 	u32 snapshot_number;
 
-	GF_TermEventFilter evt_filter;
+	GF_FSEventListener evt_filter;
 } GF_Validator;
 
 static void validator_xvs_close(GF_Validator *validator);
@@ -86,15 +85,15 @@ static void validator_xvs_add_snapshot_node(GF_Validator *validator, const char 
 	GF_XMLAttribute *att;
 	GF_SAFEALLOC(snap_node, GF_XMLNode);
 	if (!snap_node) {
-		GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate snapshot\n"));
+		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate snapshot\n"));
 		return;
 	}
 	snap_node->name = gf_strdup("snapshot");
 	snap_node->attributes = gf_list_new();
 
-	GF_SAFEALLOC(att, GF_XMLAttribute);
+	att = (GF_XMLAttribute *) gf_malloc(sizeof(GF_XMLAttribute));
 	if (!att) {
-		GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate snapshot\n"));
+		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate snapshot\n"));
 		return;
 	}
 	att->name = gf_strdup("time");
@@ -102,9 +101,9 @@ static void validator_xvs_add_snapshot_node(GF_Validator *validator, const char 
 	sprintf(att->value, "%d", scene_time);
 	gf_list_add(snap_node->attributes, att);
 	
-	GF_SAFEALLOC(att, GF_XMLAttribute);
+	att = (GF_XMLAttribute *) gf_malloc(sizeof(GF_XMLAttribute));
 	if (!att) {
-		GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate snapshot\n"));
+		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate snapshot\n"));
 		return;
 	}
 	att->name = gf_strdup("image");
@@ -115,7 +114,7 @@ static void validator_xvs_add_snapshot_node(GF_Validator *validator, const char 
 	/* adding an extra text node for line break in serialization */
 	GF_SAFEALLOC(snap_node, GF_XMLNode);
 	if (!snap_node) {
-		GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate snapshot\n"));
+		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate snapshot\n"));
 		return;
 	}
 	snap_node->type = GF_XML_TEXT_TYPE;
@@ -128,7 +127,7 @@ static char *validator_get_snapshot_name(GF_Validator *validator, Bool is_refere
 	char *name = validator->test_filename ? validator->test_filename : validator->xvs_filename;
 	char *dot;
 	char dumpname[GF_MAX_PATH];
-	dot = strrchr(name, '.');
+	dot = gf_file_ext_start(name);
 	dot[0] = 0;
 	sprintf(dumpname, "%s-%s-%03d.png", name, (is_reference?"reference":"newest"), number);
 	dot[0] = '.';
@@ -139,36 +138,82 @@ static char *validator_create_snapshot(GF_Validator *validator)
 {
 	GF_Err e;
 	GF_VideoSurface fb;
-	GF_Terminal *term = validator->term;
+	GF_Compositor *compositor = validator->compositor;
 	char *dumpname;
 
 	dumpname = validator_get_snapshot_name(validator, validator->is_recording, validator->snapshot_number);
 
-	e = gf_term_get_screen_buffer(term, &fb);
+	e = gf_sc_get_screen_buffer(compositor, &fb, GF_SC_GRAB_DEPTH_NONE);
 	if (e) {
 		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Error dumping screen buffer %s\n", gf_error_to_string(e)));
 	} else {
 		u32 dst_size = fb.width*fb.height*3;
 		char *dst = (char*)gf_malloc(sizeof(char)*dst_size);
+		if (!dst) e = GF_OUT_OF_MEM;
 
-		e = gf_img_png_enc(fb.video_buffer, fb.width, fb.height, fb.pitch_y, fb.pixel_format, dst, &dst_size);
-		if (e) {
-			GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Error encoding PNG %s\n", gf_error_to_string(e)));
-		} else {
+		if (!e)
+			e = gf_img_png_enc(fb.video_buffer, fb.width, fb.height, fb.pitch_y, fb.pixel_format, dst, &dst_size);
+
+		if (!e) {
 			FILE *png = gf_fopen(dumpname, "wb");
 			if (!png) {
-				GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Error writing file %s\n", dumpname));
+				e = GF_IO_ERR;
 			} else {
-				gf_fwrite(dst, dst_size, 1, png);
+				if (gf_fwrite(dst, dst_size, png)!=dst_size) e = GF_IO_ERR;
 				gf_fclose(png);
-				GF_LOG(GF_LOG_INFO, GF_LOG_MODULE, ("[Validator] Writing file %s\n", dumpname));
 			}
 		}
 		if (dst) gf_free(dst);
-		gf_term_release_screen_buffer(term, &fb);
+		if (e) {
+			GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Error encoding PNG to %s: %s\n", dumpname, gf_error_to_string(e)));
+		} else {
+			GF_LOG(GF_LOG_INFO, GF_LOG_MODULE, ("[Validator] Writing file %s\n", dumpname));
+		}
+		gf_sc_release_screen_buffer(compositor, &fb);
 	}
 	validator->snapshot_number++;
 	return dumpname;
+}
+
+static GF_Err validator_file_dec(char *png_filename, u32 *hint_codecid, u32 *width, u32 *height, u32 *pixel_format, char **dst, u32 *dst_size)
+{
+	u32 fsize, codecid;
+	char *data;
+	GF_Err e;
+
+	codecid = 0;
+	if (!hint_codecid || ! *hint_codecid) {
+		char *ext = gf_file_ext_start(png_filename);
+		if (!ext) return GF_NOT_SUPPORTED;
+		if (!stricmp(ext, ".png")) codecid = GF_CODECID_PNG;
+		else if (!stricmp(ext, ".jpg") || !stricmp(ext, ".jpeg")) codecid = GF_CODECID_JPEG;
+	} else {
+		codecid = *hint_codecid;
+	}
+
+	e = gf_file_load_data(png_filename, (u8 **)&data, &fsize);
+	if (e) return e;
+
+	e = GF_NOT_SUPPORTED;
+	*dst_size = 0;
+	if (codecid == GF_CODECID_JPEG) {
+#ifdef GPAC_HAS_JPEG
+		e = gf_img_jpeg_dec(data, fsize, width, height, pixel_format, NULL, dst_size, 0);
+		if (*dst_size) {
+			*dst = gf_malloc(*dst_size);
+			return gf_img_jpeg_dec(data, fsize, width, height, pixel_format, *dst, dst_size, 0);
+		}
+#endif
+	} else if (codecid == GF_CODECID_PNG) {
+#ifdef GPAC_HAS_PNG
+		e = gf_img_png_dec(data, fsize, width, height, pixel_format, NULL, dst_size);
+		if (*dst_size) {
+			*dst = gf_malloc(*dst_size);
+			return gf_img_png_dec(data, fsize, width, height, pixel_format, *dst, dst_size);
+		}
+#endif
+	}
+	return e;
 }
 
 static Bool validator_compare_snapshots(GF_Validator *validator)
@@ -176,7 +221,7 @@ static Bool validator_compare_snapshots(GF_Validator *validator)
 	char *ref_name, *new_name;
 	u32 ref_width, ref_height, ref_pixel_format, ref_data_size;
 	u32 new_width, new_height, new_pixel_format, new_data_size;
-	char *ref_data, *new_data;
+	char *ref_data=NULL, *new_data=NULL;
 	Bool result = GF_FALSE;
 	GF_Err e;
 	u32 i;
@@ -185,16 +230,19 @@ static Bool validator_compare_snapshots(GF_Validator *validator)
 	ref_name = validator_get_snapshot_name(validator, GF_TRUE, snap_number);
 	new_name = validator_get_snapshot_name(validator, GF_FALSE, snap_number);
 
-	e = gf_img_file_dec(ref_name, NULL, &ref_width, &ref_height, &ref_pixel_format, &ref_data, &ref_data_size);
+	e = validator_file_dec(ref_name, NULL, &ref_width, &ref_height, &ref_pixel_format, &ref_data, &ref_data_size);
 	if (e) {
 		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Cannot decode PNG file %s\n", ref_name));
 		goto end;
 	}
-	e = gf_img_file_dec(new_name, NULL, &new_width, &new_height, &new_pixel_format, &new_data, &new_data_size);
+	e = validator_file_dec(new_name, NULL, &new_width, &new_height, &new_pixel_format, &new_data, &new_data_size);
 	if (e) {
 		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Cannot decode PNG file %s\n", new_name));
 		goto end;
 	}
+	if (!ref_data) ref_data_size = 0;
+	if (!new_data) new_data_size = 0;
+
 	if (ref_width != new_width) {
 		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Snapshots have different widths: %d vs %d\n", ref_width, new_width));
 		goto end;
@@ -204,6 +252,10 @@ static Bool validator_compare_snapshots(GF_Validator *validator)
 		goto end;
 	}
 	if (ref_pixel_format != new_pixel_format) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Snapshots have different pixel formats: %d vs %d\n", ref_pixel_format, new_pixel_format));
+		goto end;
+	}
+	if (ref_data_size != new_data_size) {
 		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Snapshots have different pixel formats: %d vs %d\n", ref_pixel_format, new_pixel_format));
 		goto end;
 	}
@@ -220,6 +272,8 @@ end:
 	GF_LOG(GF_LOG_DEBUG, GF_LOG_MODULE, ("[Validator] PNG Comparison result: %s\n", (result?"Same":"Different")));
 	if (ref_name) gf_free(ref_name);
 	if (new_name) gf_free(new_name);
+	if (ref_data) gf_free(ref_data);
+	if (new_data) gf_free(new_data);
 	return result;
 }
 #endif
@@ -230,7 +284,7 @@ static void validator_on_video_frame(void *udta, u32 time)
 	if (validator->snapshot_next_frame) {
 #ifndef GPAC_DISABLE_AV_PARSERS
 		char *snap_name = validator_create_snapshot(validator);
-		validator_xvs_add_snapshot_node(validator, snap_name, gf_clock_time(validator->ck));
+		validator_xvs_add_snapshot_node(validator, snap_name, gf_clock_time(validator->root_odm->ck));
 		gf_free(snap_name);
 #endif
 		validator->snapshot_next_frame = GF_FALSE;
@@ -248,12 +302,10 @@ Bool validator_on_event_play(void *udta, GF_Event *event, Bool consumed_by_compo
 	case GF_EVENT_CONNECT:
 		if (event->connect.is_connected) {
 			if (!validator->trace_mode) {
-				gf_sc_add_video_listener(validator->term->compositor, &validator->video_listener);
+//deprecated				gf_sc_add_video_listener(validator->compositor, &validator->video_listener);
 			}
 
-			validator->ck = validator->term->root_scene->scene_codec ?
-			                validator->term->root_scene->scene_codec->ck :
-			                validator->term->root_scene->dyn_ck;
+			validator->root_odm = validator->compositor->root_scene->root_od;
 		}
 		break;
 	case GF_EVENT_CLICK:
@@ -271,7 +323,7 @@ Bool validator_on_event_play(void *udta, GF_Event *event, Bool consumed_by_compo
 			GF_Event evt;
 			memset(&evt, 0, sizeof(GF_Event));
 			evt.type = GF_EVENT_QUIT;
-			validator->term->compositor->video_out->on_event(validator->term->compositor->video_out->evt_cbk_hdl, &evt);
+			gf_sc_on_event(validator->compositor, &evt);
 		}
 		return GF_TRUE;
 	}
@@ -285,7 +337,7 @@ static void validator_xvs_add_event_dom(GF_Validator *validator, GF_Event *event
 
 	GF_SAFEALLOC(evt_node, GF_XMLNode);
 	if (!evt_node) {
-		GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate event\n"));
+		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate event\n"));
 		return;
 	}
 
@@ -313,14 +365,14 @@ static void validator_xvs_add_event_dom(GF_Validator *validator, GF_Event *event
 
 	evt_node->attributes = gf_list_new();
 
-	GF_SAFEALLOC(att, GF_XMLAttribute);
+	att = (GF_XMLAttribute *) gf_malloc(sizeof(GF_XMLAttribute));
 	if (!att) {
-		GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate event time\n"));
+		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate event time\n"));
 		return;
 	}
 	att->name = gf_strdup("time");
 	att->value = (char*)gf_malloc(100);
-	sprintf(att->value, "%f", gf_scene_get_time(validator->term->root_scene)*1000);
+	sprintf(att->value, "%f", gf_scene_get_time(validator->compositor->root_scene)*1000);
 	gf_list_add(evt_node->attributes, att);
 
 	switch (event->type) {
@@ -332,9 +384,9 @@ static void validator_xvs_add_event_dom(GF_Validator *validator, GF_Event *event
 	case GF_EVENT_MOUSEMOVE:
 	case GF_EVENT_MOUSEWHEEL:
 		if (event->type == GF_EVENT_MOUSEDOWN || event->type == GF_EVENT_MOUSEUP) {
-			GF_SAFEALLOC(att, GF_XMLAttribute);
+			att = (GF_XMLAttribute *) gf_malloc(sizeof(GF_XMLAttribute));
 			if (!att) {
-				GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate event info\n"));
+				GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate event info\n"));
 				return;
 			}
 			att->name = gf_strdup("button");
@@ -351,9 +403,9 @@ static void validator_xvs_add_event_dom(GF_Validator *validator, GF_Event *event
 			}
 			gf_list_add(evt_node->attributes, att);
 		}
-		GF_SAFEALLOC(att, GF_XMLAttribute);
+		att = (GF_XMLAttribute *) gf_malloc(sizeof(GF_XMLAttribute));
 		if (!att) {
-			GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate event info\n"));
+			GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate event info\n"));
 			return;
 		}
 		att->name = gf_strdup("x");
@@ -361,9 +413,9 @@ static void validator_xvs_add_event_dom(GF_Validator *validator, GF_Event *event
 		sprintf(att->value, "%d", event->mouse.x);
 		gf_list_add(evt_node->attributes, att);
 
-		GF_SAFEALLOC(att, GF_XMLAttribute);
+		att = (GF_XMLAttribute *) gf_malloc(sizeof(GF_XMLAttribute));
 		if (!att) {
-			GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate event info\n"));
+			GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate event info\n"));
 			return;
 		}
 		att->name = gf_strdup("y");
@@ -371,9 +423,9 @@ static void validator_xvs_add_event_dom(GF_Validator *validator, GF_Event *event
 		sprintf(att->value, "%d", event->mouse.y);
 		gf_list_add(evt_node->attributes, att);
 		if (event->type == GF_EVENT_MOUSEWHEEL) {
-			GF_SAFEALLOC(att, GF_XMLAttribute);
+			att = (GF_XMLAttribute *) gf_malloc(sizeof(GF_XMLAttribute));
 			if (!att) {
-				GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate event info\n"));
+				GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate event info\n"));
 				return;
 			}
 			att->name = gf_strdup("wheel_pos");
@@ -382,9 +434,9 @@ static void validator_xvs_add_event_dom(GF_Validator *validator, GF_Event *event
 			gf_list_add(evt_node->attributes, att);
 		}
 		if (event->mouse.key_states & GF_KEY_MOD_SHIFT) {
-			GF_SAFEALLOC(att, GF_XMLAttribute);
+			att = (GF_XMLAttribute *) gf_malloc(sizeof(GF_XMLAttribute));
 			if (!att) {
-				GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate event info\n"));
+				GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate event info\n"));
 				return;
 			}
 			att->name = gf_strdup("shift");
@@ -392,9 +444,9 @@ static void validator_xvs_add_event_dom(GF_Validator *validator, GF_Event *event
 			gf_list_add(evt_node->attributes, att);
 		}
 		if (event->mouse.key_states & GF_KEY_MOD_CTRL) {
-			GF_SAFEALLOC(att, GF_XMLAttribute);
+			att = (GF_XMLAttribute *) gf_malloc(sizeof(GF_XMLAttribute));
 			if (!att) {
-				GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate event info\n"));
+				GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate event info\n"));
 				return;
 			}
 			att->name = gf_strdup("ctrl");
@@ -402,9 +454,9 @@ static void validator_xvs_add_event_dom(GF_Validator *validator, GF_Event *event
 			gf_list_add(evt_node->attributes, att);
 		}
 		if (event->mouse.key_states & GF_KEY_MOD_ALT) {
-			GF_SAFEALLOC(att, GF_XMLAttribute);
+			att = (GF_XMLAttribute *) gf_malloc(sizeof(GF_XMLAttribute));
 			if (!att) {
-				GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate event info\n"));
+				GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate event info\n"));
 				return;
 			}
 			att->name = gf_strdup("alt");
@@ -416,9 +468,9 @@ static void validator_xvs_add_event_dom(GF_Validator *validator, GF_Event *event
 	case GF_EVENT_KEYUP:
 	case GF_EVENT_KEYDOWN:
 	case GF_EVENT_LONGKEYPRESS:
-		GF_SAFEALLOC(att, GF_XMLAttribute);
+		att = (GF_XMLAttribute *) gf_malloc(sizeof(GF_XMLAttribute));
 		if (!att) {
-			GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate event info\n"));
+			GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate event info\n"));
 			return;
 		}
 		att->name = gf_strdup("key_identifier");
@@ -427,9 +479,9 @@ static void validator_xvs_add_event_dom(GF_Validator *validator, GF_Event *event
 #endif
 		gf_list_add(evt_node->attributes, att);
 		if (event->key.flags & GF_KEY_MOD_SHIFT) {
-			GF_SAFEALLOC(att, GF_XMLAttribute);
+			att = (GF_XMLAttribute *) gf_malloc(sizeof(GF_XMLAttribute));
 			if (!att) {
-				GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate event info\n"));
+				GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate event info\n"));
 				return;
 			}
 			att->name = gf_strdup("shift");
@@ -437,9 +489,9 @@ static void validator_xvs_add_event_dom(GF_Validator *validator, GF_Event *event
 			gf_list_add(evt_node->attributes, att);
 		}
 		if (event->key.flags & GF_KEY_MOD_CTRL) {
-			GF_SAFEALLOC(att, GF_XMLAttribute);
+			att = (GF_XMLAttribute *) gf_malloc(sizeof(GF_XMLAttribute));
 			if (!att) {
-				GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate event info\n"));
+				GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate event info\n"));
 				return;
 			}
 			att->name = gf_strdup("ctrl");
@@ -447,9 +499,9 @@ static void validator_xvs_add_event_dom(GF_Validator *validator, GF_Event *event
 			gf_list_add(evt_node->attributes, att);
 		}
 		if (event->key.flags & GF_KEY_MOD_ALT) {
-			GF_SAFEALLOC(att, GF_XMLAttribute);
+			att = (GF_XMLAttribute *) gf_malloc(sizeof(GF_XMLAttribute));
 			if (!att) {
-				GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate event info\n"));
+				GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate event info\n"));
 				return;
 			}
 			att->name = gf_strdup("alt");
@@ -458,9 +510,9 @@ static void validator_xvs_add_event_dom(GF_Validator *validator, GF_Event *event
 		}
 		break;
 	case GF_EVENT_TEXTINPUT:
-		GF_SAFEALLOC(att, GF_XMLAttribute);
+		att = (GF_XMLAttribute *) gf_malloc(sizeof(GF_XMLAttribute));
 		if (!att) {
-			GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate event info\n"));
+			GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate event info\n"));
 			return;
 		}
 		att->name = gf_strdup("unicode-char");
@@ -473,7 +525,7 @@ static void validator_xvs_add_event_dom(GF_Validator *validator, GF_Event *event
 	/* adding an extra text node for line break in serialization */
 	GF_SAFEALLOC(evt_node, GF_XMLNode);
 	if (!evt_node) {
-		GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate event\n"));
+		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate event\n"));
 		return;
 	}
 	evt_node->type = GF_XML_TEXT_TYPE;
@@ -489,9 +541,9 @@ Bool validator_on_event_record(void *udta, GF_Event *event, Bool consumed_by_com
 	case GF_EVENT_CONNECT:
 		if (event->connect.is_connected) {
 			if (!validator->trace_mode) {
-				gf_sc_add_video_listener(validator->term->compositor, &validator->video_listener);
+//deprecated				gf_sc_add_video_listener(validator->compositor, &validator->video_listener);
 			}
-			validator->ck = validator->term->root_scene->scene_codec ? validator->term->root_scene->scene_codec->ck : validator->term->root_scene->dyn_ck;
+			validator->root_odm = validator->compositor->root_scene->root_od;
 		}
 		break;
 	case GF_EVENT_KEYDOWN:
@@ -515,28 +567,28 @@ Bool validator_on_event_record(void *udta, GF_Event *event, Bool consumed_by_com
 			if (event->key.key_code == GF_KEY_INSERT) {
 #ifndef GPAC_DISABLE_AV_PARSERS
 				char *snap_name = validator_create_snapshot(validator);
-				validator_xvs_add_snapshot_node(validator, snap_name, gf_clock_time(validator->ck));
+				validator_xvs_add_snapshot_node(validator, snap_name, gf_clock_time(validator->root_odm->ck));
 				gf_free(snap_name);
 #endif
 			} else if (event->key.key_code == GF_KEY_END) {
 				GF_Event evt;
 				memset(&evt, 0, sizeof(GF_Event));
 				evt.type = GF_EVENT_QUIT;
-				validator->term->compositor->video_out->on_event(validator->term->compositor->video_out->evt_cbk_hdl, &evt);
+				gf_sc_on_event(validator->compositor, &evt);
 			} else if (event->key.key_code == GF_KEY_F1) {
 				validator->snapshot_next_frame = GF_TRUE;
 			}
 		} else if (event->key.key_code == GF_KEY_PAGEDOWN) {
 			rec_event = GF_FALSE;
 			validator_xvs_close(validator);
-			gf_term_disconnect(validator->term);
-			gf_sc_remove_video_listener(validator->term->compositor, &validator->video_listener);
+			gf_sc_disconnect(validator->compositor);
+//deprecated			gf_sc_remove_video_listener(validator->compositor, &validator->video_listener);
 			validator_xvs_next(validator, GF_FALSE);
 		} else if (event->key.key_code == GF_KEY_PAGEUP) {
 			rec_event = GF_FALSE;
 			validator_xvs_close(validator);
-			gf_term_disconnect(validator->term);
-			gf_sc_remove_video_listener(validator->term->compositor, &validator->video_listener);
+			gf_sc_disconnect(validator->compositor);
+//deprecated			gf_sc_remove_video_listener(validator->compositor, &validator->video_listener);
 			validator_xvs_next(validator, GF_TRUE);
 		} else if (event->key.key_code == GF_KEY_CONTROL) {
 			rec_event = GF_FALSE;
@@ -553,7 +605,6 @@ static void validator_xvl_open(GF_Validator *validator)
 {
 	GF_Err e;
 	u32 att_index;
-	GF_XMLAttribute *att;
 	validator->xvl_parser = gf_xml_dom_new();
 	e = gf_xml_dom_parse(validator->xvl_parser, validator->xvl_filename, NULL, NULL);
 	if (e != GF_OK) {
@@ -569,7 +620,7 @@ static void validator_xvl_open(GF_Validator *validator)
 	}
 	att_index = 0;
 	while (1) {
-		att = (GF_XMLAttribute*)gf_list_get(validator->xvl_node->attributes, att_index);
+		GF_XMLAttribute *att = (GF_XMLAttribute*)gf_list_get(validator->xvl_node->attributes, att_index);
 		if (!att) break;
 		if (!strcmp(att->name, "content-base")) {
 			validator->test_base = gf_strdup(att->value);
@@ -587,13 +638,13 @@ static void validator_xvl_close(GF_Validator *validator)
 			char *xvl_content;
 			char result_filename[GF_MAX_PATH];
 			char *dot;
-			xvl_content = gf_xml_dom_serialize(validator->xvl_node, GF_FALSE);
-			dot = strrchr(validator->xvl_filename, '.');
+			xvl_content = gf_xml_dom_serialize(validator->xvl_node, GF_FALSE, GF_FALSE);
+			dot = gf_file_ext_start(validator->xvl_filename);
 			dot[0] = 0;
 			sprintf(result_filename, "%s-result.xml", validator->xvl_filename);
 			dot[0] = '.';
 			xvl_fp = gf_fopen(result_filename, "wt");
-			gf_fwrite(xvl_content, strlen(xvl_content), 1, xvl_fp);
+			gf_fwrite(xvl_content, strlen(xvl_content), xvl_fp);
 			gf_fclose(xvl_fp);
 			gf_free(xvl_content);
 		}
@@ -647,7 +698,7 @@ static Bool validator_xvs_open(GF_Validator *validator)
 		if (validator->is_recording) {
 			GF_SAFEALLOC(validator->xvs_node, GF_XMLNode);
 			if (!validator->xvs_node) {
-				GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate root node\n"));
+				GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate root node\n"));
 				return 0;
 			}
 			
@@ -708,7 +759,7 @@ static Bool validator_xvs_open(GF_Validator *validator)
 		/* adding an extra text node for line break in serialization */
 		GF_SAFEALLOC(node, GF_XMLNode);
 		if (!node) {
-			GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate node\n"));
+			GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate node\n"));
 			return GF_FALSE;
 		}
 		node->type = GF_XML_TEXT_TYPE;
@@ -726,12 +777,11 @@ static void validator_xvs_close(GF_Validator *validator)
 		if (validator->is_recording) {
 			FILE *xvs_fp;
 			char *xvs_content;
-			char filename[100];
-			GF_XMLAttribute *att;
 			GF_XMLAttribute *att_file = NULL;
 			u32 att_index = 0;
             
             if (!validator->trace_mode) {
+				GF_XMLAttribute *att;
                 while (1) {
                     att = (GF_XMLAttribute*)gf_list_get(validator->xvs_node->attributes, att_index);
                     if (!att) {
@@ -745,7 +795,7 @@ static void validator_xvs_close(GF_Validator *validator)
                 if (!att_file) {
                     GF_SAFEALLOC(att, GF_XMLAttribute);
 					if (!att) {
-						GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate file attribute\n"));
+						GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate file attribute\n"));
 						return;
 					}
                     att->name = gf_strdup("file");
@@ -755,15 +805,16 @@ static void validator_xvs_close(GF_Validator *validator)
                     if (att->value) gf_free(att->value);
                 }
                 if (validator->test_base) {
+					char filename[100];
                     sprintf(filename, "%s%c%s", validator->test_base, GF_PATH_SEPARATOR, validator->test_filename);
                     att->value = gf_strdup(filename);
                 } else {
                     att->value = gf_strdup(validator->test_filename);
                 }
             }
-			xvs_content = gf_xml_dom_serialize(validator->xvs_node, GF_FALSE);
+			xvs_content = gf_xml_dom_serialize(validator->xvs_node, GF_FALSE, GF_FALSE);
 			xvs_fp = gf_fopen(validator->xvs_filename, "wt");
-			gf_fwrite(xvs_content, strlen(xvs_content), 1, xvs_fp);
+			gf_fwrite(xvs_content, strlen(xvs_content), xvs_fp);
 			gf_fclose(xvs_fp);
 			gf_free(xvs_content);
             if (validator->owns_root)
@@ -786,7 +837,7 @@ static void validator_xvs_close(GF_Validator *validator)
 				if (!att_result) {
 					GF_SAFEALLOC(att_result, GF_XMLAttribute);
 					if (!att_result) {
-						GF_LOG(GF_LOG_ERROR, GF_LOG_INTERACT, ("[Validator] Failed to allocate result attribute\n"));
+						GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Failed to allocate result attribute\n"));
 						return;
 					}
 					att_result->name = gf_strdup("result");
@@ -803,28 +854,27 @@ static void validator_xvs_close(GF_Validator *validator)
 	validator->xvs_node_in_xvl = NULL;
 	validator->xvs_filename = NULL;
 	validator->test_filename = NULL;
-	validator->ck = NULL;
+	validator->root_odm = NULL;
 	validator->xvs_event_index = 0;
 	validator->snapshot_number = 0;
 }
 
 static void validator_test_open(GF_Validator *validator)
 {
-	char filename[100];
-
 	if (!validator->trace_mode) {
+		char filename[100];
 		if (validator->test_base)
 			sprintf(filename, "%s%c%s", validator->test_base, GF_PATH_SEPARATOR, validator->test_filename);
 		else
 			sprintf(filename, "%s", validator->test_filename);
 
-		gf_sc_add_video_listener(validator->term->compositor, &validator->video_listener);
+//deprecated		gf_sc_add_video_listener(validator->compositor, &validator->video_listener);
 		if (validator->is_recording)
 			validator->snapshot_next_frame = GF_TRUE;
-		gf_term_connect(validator->term, filename);
+		gf_sc_connect_from_time(validator->compositor, filename, 0, 0, 0, NULL);
 
 	}
-//	validator->ck = validator->term->root_scene->scene_codec ? validator->term->root_scene->scene_codec->ck : validator->term->root_scene->dyn_ck;
+//	validator->ck = validator->compositor->root_scene->scene_codec ? validator->compositor->root_scene->scene_codec->ck : validator->compositor->root_scene->dyn_ck;
 }
 
 static Bool validator_xvs_next(GF_Validator *validator, Bool reverse)
@@ -854,14 +904,16 @@ static Bool validator_xvs_next(GF_Validator *validator, Bool reverse)
 static Bool validator_load_event(GF_Validator *validator)
 {
 	GF_XMLNode *event_node;
-	GF_XMLAttribute *att;
 	u32 att_index;
 
 	memset(&validator->next_event, 0, sizeof(GF_Event));
 	validator->evt_loaded = GF_FALSE;
 	validator->next_event_snapshot = GF_FALSE;
 
-	if (!validator->xvs_node) return GF_FALSE;
+	if (!validator->xvs_node) {
+		validator->compositor->validator_mode = GF_FALSE;
+		return GF_FALSE;
+	}
 
 	while (1) {
 		event_node = (GF_XMLNode*)gf_list_get(validator->xvs_node->content, validator->xvs_event_index);
@@ -889,7 +941,7 @@ static Bool validator_load_event(GF_Validator *validator)
 
 	att_index = 0;
 	while (1) {
-		att = (GF_XMLAttribute*)gf_list_get(event_node->attributes, att_index);
+		GF_XMLAttribute *att = (GF_XMLAttribute*)gf_list_get(event_node->attributes, att_index);
 		if (!att) break;
 		if (!strcmp(att->name, "time")) {
 			validator->next_time = atoi(att->value);
@@ -923,39 +975,36 @@ static Bool validator_load_event(GF_Validator *validator)
 		att_index++;
 	}
 	validator->evt_loaded = GF_TRUE;
+	validator->compositor->sys_frames_pending = GF_TRUE;
+	validator->compositor->event_pending = GF_TRUE;
 	return GF_TRUE;
 }
 
-static Bool validator_process(GF_TermExt *termext, u32 action, void *param)
+static Bool validator_process(GF_CompositorExt *termext, u32 action, void *param)
 {
 	const char *opt;
 	GF_Validator *validator = (GF_Validator*)termext->udta;
 
 	switch (action) {
 
-	/* Upon starting of the terminal, we parse (possibly an XVL file), an XVS file, and start the first test sequence */
-	case GF_TERM_EXT_START:
-		validator->term = (GF_Terminal *) param;
-
-		/* if the validator is loaded, we switch off anti-aliasing for image comparison and we put a low framerate,
-		but we store the previous value to restore it upon termination of the validator */
-		opt = (char *)gf_modules_get_option((GF_BaseInterface*)termext, "Compositor", "FrameRate");
-		if (opt) validator->prev_fps = gf_strdup(opt);
-		opt = (char *)gf_modules_get_option((GF_BaseInterface*)termext, "Compositor", "AntiAlias");
-		if (opt) validator->prev_alias = gf_strdup(opt);
+	/* Upon starting of the compositor, we parse (possibly an XVL file), an XVS file, and start the first test sequence */
+	case GF_COMPOSITOR_EXT_START:
+		validator->compositor = (GF_Compositor *) param;
 
 		/* Check if the validator should be loaded and in which mode */
-		opt = gf_modules_get_option((GF_BaseInterface*)termext, "Validator", "Mode");
+		opt = gf_module_get_key((GF_BaseInterface *)termext, "mode");
 		if (!opt) {
 			GF_LOG(GF_LOG_DEBUG, GF_LOG_MODULE, ("Validator missing configuration, stopping.\n"));
 			return GF_FALSE;
-		} else if (!strcmp(opt, "Play")) {
+		} else if (!strcmp(opt, "play") ) {
 			GF_LOG(GF_LOG_INFO, GF_LOG_MODULE, ("Validator starting in playback mode.\n"));
 			validator->is_recording = GF_FALSE;
-		} else if (!strcmp(opt, "Record")) {
+			//this will indicate to the compositor to increment scene time even though no new changes
+			validator->compositor->validator_mode = GF_TRUE;
+		} else if (!strcmp(opt, "record")) {
 			GF_LOG(GF_LOG_INFO, GF_LOG_MODULE, ("Validator starting in recording mode.\n"));
 			validator->is_recording = GF_TRUE;
-		} else if (!strcmp(opt, "Disable")) {
+		} else if (!strcmp(opt, "disable")) {
 			GF_LOG(GF_LOG_INFO, GF_LOG_MODULE, ("Validator is disabled.\n"));
 			return GF_FALSE;
 		} else {
@@ -963,13 +1012,15 @@ static Bool validator_process(GF_TermExt *termext, u32 action, void *param)
 			return GF_FALSE;
 		}
 
+		gf_opts_set_key("validator", "mode", "disable");
+
 		/* initializes the validator and starts */
 		validator->xvs_filename = NULL;
-		validator->xvl_filename = (char *)gf_modules_get_option((GF_BaseInterface*)termext, "Validator", "XVL");
+		validator->xvl_filename = (char *)gf_module_get_key((GF_BaseInterface *)termext, "xvl");
 		if (!validator->xvl_filename) {
-			validator->xvs_filename = (char *)gf_modules_get_option((GF_BaseInterface*)termext, "Validator", "XVS");
+			validator->xvs_filename = (char *)gf_module_get_key((GF_BaseInterface *)termext, "xvs");
 			if (!validator->xvs_filename) {
-				validator->xvs_filename = (char *)gf_modules_get_option((GF_BaseInterface*)termext, "Validator", "Trace");
+				validator->xvs_filename = (char *)gf_module_get_key((GF_BaseInterface *)termext, "trace");
 				if (!validator->xvs_filename) {
 					GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("Validator configuration without input, stopping.\n"));
 					return GF_FALSE;
@@ -983,11 +1034,6 @@ static Bool validator_process(GF_TermExt *termext, u32 action, void *param)
 		} else {
 			GF_LOG(GF_LOG_INFO, GF_LOG_MODULE, ("Validator using scenario playlist: %s\n", validator->xvl_filename));
 		}
-
-		/* since we changed parameters of the compositor, we need to trigger a reconfiguration */
-//		gf_modules_set_option((GF_BaseInterface*)termext, "Compositor", "FrameRate", "5.0");
-//		gf_modules_set_option((GF_BaseInterface*)termext, "Compositor", "AntiAlias", "None");
-//		gf_term_set_option(validator->term, GF_OPT_RELOAD_CONFIG, 1);
 
 		/* TODO: if start returns 0, the module is not loaded, so the above init (filter registration) is not removed,
 		   should probably return 1 all the time, to make sure stop is called */
@@ -1018,11 +1064,11 @@ static Bool validator_process(GF_TermExt *termext, u32 action, void *param)
 		validator->evt_filter.udta = validator;
 		if (!validator->is_recording) {
 			validator->evt_filter.on_event = validator_on_event_play;
-			termext->caps |= GF_TERM_EXTENSION_NOT_THREADED;
+			termext->caps |= GF_COMPOSITOR_EXTENSION_NOT_THREADED;
 		} else {
 			validator->evt_filter.on_event = validator_on_event_record;
 		}
-		gf_term_add_event_filter(validator->term, &validator->evt_filter);
+		gf_filter_add_event_listener(validator->compositor->filter, &validator->evt_filter);
 		validator->video_listener.udta = validator;
 		validator->video_listener.on_video_frame = validator_on_video_frame;
 		validator->video_listener.on_video_reconfig = validator_on_video_reconfig;
@@ -1033,14 +1079,14 @@ static Bool validator_process(GF_TermExt *termext, u32 action, void *param)
 		}
 		return GF_TRUE;
 
-	/* when the terminal stops, we close the XVS parser and XVL parser if any, restore the config,
+	/* when the compositor stops, we close the XVS parser and XVL parser if any, restore the config,
 	and free all validator data (the validator will be destroyed when the module is unloaded)
-	Note: we don't need to disconnect the terminal since it's already stopping */
-	case GF_TERM_EXT_STOP:
-		gf_term_remove_event_filter(validator->term, &validator->evt_filter);
+	Note: we don't need to disconnect the compositor since it's already stopping */
+	case GF_COMPOSITOR_EXT_STOP:
+		gf_filter_remove_event_listener(validator->compositor->filter, &validator->evt_filter);
 		validator_xvs_close(validator);
 		validator_xvl_close(validator);
-		validator->term = NULL;
+		validator->compositor = NULL;
 		if (validator->test_base) {
 			gf_free(validator->test_base);
 			validator->test_base = NULL;
@@ -1048,31 +1094,22 @@ static Bool validator_process(GF_TermExt *termext, u32 action, void *param)
 		/*auto-disable the recording by default*/
 		if (!validator->trace_mode) {
 			if (validator->is_recording ) {
-				gf_modules_set_option((GF_BaseInterface*)termext, "Validator", "Mode", "Play");
+				gf_opts_set_key("validator", "mode", "play");
 			} else {
-				gf_modules_set_option((GF_BaseInterface*)termext, "Validator", "Mode", "Disable");
+				gf_opts_set_key("validator", "mode", "disable");
 			}
 		}
 		GF_LOG(GF_LOG_INFO, GF_LOG_MODULE, ("Stopping validator\n"));
-		if (validator->prev_fps) {
-			gf_modules_set_option((GF_BaseInterface*)termext, "Compositor", "FrameRate", validator->prev_fps);
-			gf_free(validator->prev_fps);
-			validator->prev_fps = NULL;
-		}
-		if (validator->prev_alias) {
-			gf_modules_set_option((GF_BaseInterface*)termext, "Compositor", "AntiAlias", validator->prev_alias);
-			gf_free(validator->prev_alias);
-			validator->prev_alias = NULL;
-		}
 		break;
 
-	/* When called in the main loop of the terminal, we don't do anything in the recording mode.
+	/* When called in the main loop of the compositor, we don't do anything in the recording mode.
 	   In the playing/validating mode, we need to check if an event needs to be dispatched or if snapshots need to be made,
 	   until there is no more event, in which case we trigger either the load of the next XVS or the quit */
-	case GF_TERM_EXT_PROCESS:
+	case GF_COMPOSITOR_EXT_PROCESS:
 		/* if the time is right, dispatch the event and load the next one */
-		while (!validator->is_recording && validator->evt_loaded && validator->ck && (validator->next_time <= gf_clock_time(validator->ck) )) {
+		while (!validator->is_recording && validator->evt_loaded && validator->root_odm && validator->root_odm->ck && (validator->next_time <= gf_clock_time(validator->root_odm->ck) )) {
 			Bool has_more_events;
+			validator->compositor->event_pending = GF_FALSE;
 			//u32 diff = gf_clock_time(validator->ck) - validator->next_time;
 			//GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[Validator] Time diff: evt_time=%d  clock_time = %d, diff=%d\n", validator->next_time, gf_clock_time(validator->ck), diff));
 			if (validator->next_event_snapshot) {
@@ -1085,20 +1122,20 @@ static Bool validator_process(GF_TermExt *termext, u32 action, void *param)
 				validator->next_event_snapshot = GF_FALSE;
 #endif
 			} else {
-				validator->term->compositor->video_out->on_event(validator->term->compositor->video_out->evt_cbk_hdl, &validator->next_event);
+				gf_sc_on_event(validator->compositor, &validator->next_event);
 			}
 			has_more_events = validator_load_event(validator);
 			if (!has_more_events) {
 				validator_xvs_close(validator);
 				if (! validator->trace_mode) {
-					gf_term_disconnect(validator->term);
-					gf_sc_remove_video_listener(validator->term->compositor, &validator->video_listener);
+					gf_sc_disconnect(validator->compositor);
+//deprecated					gf_sc_remove_video_listener(validator->compositor, &validator->video_listener);
 					validator_xvs_next(validator, GF_FALSE);
 					if (!validator->xvs_node) {
 						GF_Event evt;
 						memset(&evt, 0, sizeof(GF_Event));
 						evt.type = GF_EVENT_QUIT;
-						validator->term->compositor->video_out->on_event(validator->term->compositor->video_out->evt_cbk_hdl, &evt);
+						gf_sc_on_event(validator->compositor, &evt);
 					} else {
 						if (!validator->is_recording) {
 							validator_load_event(validator);
@@ -1112,28 +1149,42 @@ static Bool validator_process(GF_TermExt *termext, u32 action, void *param)
 	return GF_FALSE;
 }
 
+static GF_GPACArg ValidatorArgs[] = {
+	GF_DEF_ARG("mode", NULL, "operationg mode\n"
+	"- play: replay events\n"
+	"- record: record events\n"
+	"- disable: disable validator", NULL, NULL, GF_ARG_STRING, 0),
+	GF_DEF_ARG("xvl", NULL, "filename for XVL", NULL, NULL, GF_ARG_STRING, 0),
+	GF_DEF_ARG("xvs", NULL, "filename for XVS", NULL, NULL, GF_ARG_STRING, 0),
+	GF_DEF_ARG("trace", NULL, "filename for event trace", NULL, NULL, GF_ARG_STRING, 0),
+	{0},
+};
 
-GF_TermExt *validator_new()
+GF_CompositorExt *validator_new()
 {
-	GF_TermExt *dr;
+	GF_CompositorExt *dr;
 	GF_Validator *validator;
-	dr = (GF_TermExt*)gf_malloc(sizeof(GF_TermExt));
-	memset(dr, 0, sizeof(GF_TermExt));
-	GF_REGISTER_MODULE_INTERFACE(dr, GF_TERM_EXT_INTERFACE, "GPAC Test Validator", "gpac distribution");
+	dr = (GF_CompositorExt*)gf_malloc(sizeof(GF_CompositorExt));
+	memset(dr, 0, sizeof(GF_CompositorExt));
+	GF_REGISTER_MODULE_INTERFACE(dr, GF_COMPOSITOR_EXT_INTERFACE, "validator", "gpac distribution");
 
 	GF_SAFEALLOC(validator, GF_Validator);
+	if (!validator) {
+		gf_free(dr);
+		return NULL;
+	}
 	dr->process = validator_process;
 	dr->udta = validator;
+	dr->description = "Compositor Validator Extension";
+	dr->args = ValidatorArgs;
 	return dr;
 }
 
 
 void validator_delete(GF_BaseInterface *ifce)
 {
-	GF_TermExt *dr = (GF_TermExt *) ifce;
+	GF_CompositorExt *dr = (GF_CompositorExt *) ifce;
 	GF_Validator *validator = (GF_Validator*)dr->udta;
-	if (validator->prev_fps) gf_free(validator->prev_fps);
-	if (validator->prev_alias) gf_free(validator->prev_alias);
 	gf_free(validator);
 	gf_free(dr);
 }
@@ -1142,7 +1193,7 @@ GPAC_MODULE_EXPORT
 const u32 *QueryInterfaces()
 {
 	static u32 si [] = {
-		GF_TERM_EXT_INTERFACE,
+		GF_COMPOSITOR_EXT_INTERFACE,
 		0
 	};
 	return si;
@@ -1151,7 +1202,7 @@ const u32 *QueryInterfaces()
 GPAC_MODULE_EXPORT
 GF_BaseInterface *LoadInterface(u32 InterfaceType)
 {
-	if (InterfaceType == GF_TERM_EXT_INTERFACE) return (GF_BaseInterface *)validator_new();
+	if (InterfaceType == GF_COMPOSITOR_EXT_INTERFACE) return (GF_BaseInterface *)validator_new();
 	return NULL;
 }
 
@@ -1159,10 +1210,14 @@ GPAC_MODULE_EXPORT
 void ShutdownInterface(GF_BaseInterface *ifce)
 {
 	switch (ifce->InterfaceType) {
-	case GF_TERM_EXT_INTERFACE:
+	case GF_COMPOSITOR_EXT_INTERFACE:
 		validator_delete(ifce);
 		break;
 	}
 }
 
 GPAC_MODULE_STATIC_DECLARATION( validator )
+
+
+#endif //#ifndef GPAC_DISABLE_COMPOSITOR
+

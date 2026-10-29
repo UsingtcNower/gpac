@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2025
  *					All rights reserved
  *
  *  This file is part of GPAC / MPEG-4 ObjectDescriptor sub-project
@@ -99,9 +99,6 @@ GF_Err gf_odf_slc_set_pref(GF_SLConfig *sl)
 		sl->timestampResolution = 1000;
 		sl->timestampLength = 32;
 		break;
-	case SLPredef_SkipSL:
-		sl->predefined = SLPredef_SkipSL;
-		break;
 	/*handle all unknown predefined as predef-null*/
 	default:
 		sl->useAccessUnitStartFlag = 0;
@@ -124,28 +121,6 @@ GF_Err gf_odf_slc_set_pref(GF_SLConfig *sl)
 	return GF_OK;
 }
 
-u32 SLIsPredefined(GF_SLConfig *sl)
-{
-	if (!sl) return 0;
-	if (sl->predefined) return sl->predefined;
-
-	if (!sl->useAccessUnitStartFlag
-	        &&  !sl->useAccessUnitEndFlag
-	        && !sl->usePaddingFlag
-	        && sl->useTimestampsFlag
-	        && !sl->useIdleFlag
-	        && !sl->durationFlag
-	        && !sl->timestampLength
-	        && !sl->OCRLength
-	        && !sl->AULength
-	        && !sl->instantBitrateLength
-	        && !sl->degradationPriorityLength
-	        && !sl->AUSeqNumLength
-	        && !sl->packetSeqNumLength)
-		return SLPredef_MP4;
-
-	return 0;
-}
 
 //this function gets the real amount of bytes needed to store the timeStamp
 static u32 GetTSbytesLen(GF_SLConfig *sl)
@@ -191,6 +166,8 @@ GF_Err gf_odf_read_slc(GF_BitStream *bs, GF_SLConfig *sl, u32 DescSize)
 		e = gf_odf_slc_set_pref(sl);
 		if (e) return e;
 	} else {
+		if (gf_bs_available(bs) < 15) return GF_ODF_INVALID_DESCRIPTOR;
+
 		sl->useAccessUnitStartFlag = gf_bs_read_int(bs, 1);
 		sl->useAccessUnitEndFlag = gf_bs_read_int(bs, 1);
 		sl->useRandomAccessPointFlag = gf_bs_read_int(bs, 1);
@@ -204,13 +181,10 @@ GF_Err gf_odf_read_slc(GF_BitStream *bs, GF_SLConfig *sl, u32 DescSize)
 
 		sl->timestampLength = gf_bs_read_int(bs, 8);
 		if (sl->timestampLength > 64) return GF_ODF_INVALID_DESCRIPTOR;
-
 		sl->OCRLength = gf_bs_read_int(bs, 8);
 		if (sl->OCRLength > 64) return GF_ODF_INVALID_DESCRIPTOR;
-
 		sl->AULength = gf_bs_read_int(bs, 8);
 		if (sl->AULength > 32) return GF_ODF_INVALID_DESCRIPTOR;
-
 		sl->instantBitrateLength = gf_bs_read_int(bs, 8);
 		sl->degradationPriorityLength = gf_bs_read_int(bs, 4);
 		sl->AUSeqNumLength = gf_bs_read_int(bs, 5);
@@ -307,9 +281,9 @@ for this PDU. AUs must be split in PDUs by another process if needed (packetizer
 GF_EXPORT
 void gf_sl_packetize(GF_SLConfig* slConfig,
                      GF_SLHeader *Header,
-                     char *PDU,
+                     u8 *PDU,
                      u32 size,
-                     char **outPacket,
+                     u8 **outPacket,
                      u32 *OutSize)
 {
 	GF_BitStream *bs = gf_bs_new(NULL, 0, GF_BITSTREAM_WRITE);
@@ -399,7 +373,7 @@ u32 gf_sl_get_header_size(GF_SLConfig* slConfig, GF_SLHeader *Header)
 
 
 GF_EXPORT
-void gf_sl_depacketize (GF_SLConfig *slConfig, GF_SLHeader *Header, const char *PDU, u32 PDULength, u32 *HeaderLen)
+void gf_odf_sl_depacketize (GF_SLConfig *slConfig, GF_SLHeader *Header, const u8 *PDU, u32 PDULength, u32 *HeaderLen)
 {
 	GF_BitStream *bs;
 	*HeaderLen = 0;

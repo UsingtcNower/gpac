@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2024
  *					All rights reserved
  *
  *  This file is part of GPAC / IETF RTP/RTSP/SDP sub-project
@@ -31,7 +31,7 @@
 
 static void rtp_amr_flush(GP_RTPPacketizer *builder)
 {
-	char *hdr;
+	u8 *hdr;
 	u32 hdr_size;
 	if (!builder->bytesInPacket) return;
 	gf_bs_get_content(builder->pck_hdr, &hdr, &hdr_size);
@@ -46,7 +46,7 @@ static void rtp_amr_flush(GP_RTPPacketizer *builder)
 	builder->last_au_sn = 0;
 }
 
-GF_Err gp_rtp_builder_do_amr(GP_RTPPacketizer *builder, char *data, u32 data_size, u8 IsAUEnd, u32 FullAUSize)
+GF_Err gp_rtp_builder_do_amr(GP_RTPPacketizer *builder, u8 *data, u32 data_size, u8 IsAUEnd, u32 FullAUSize)
 {
 	u32 offset, rtp_ts, block_size;
 
@@ -80,7 +80,7 @@ GF_Err gp_rtp_builder_do_amr(GP_RTPPacketizer *builder, char *data, u32 data_siz
 			builder->rtp_header.Marker = 0;	/*never set*/
 			builder->rtp_header.SequenceNumber += 1;
 			builder->OnNewPacket(builder->cbk_obj, &builder->rtp_header);
-			assert(builder->pck_hdr==NULL);
+			gf_assert(builder->pck_hdr==NULL);
 
 			/*always have header and TOC*/
 			builder->pck_hdr = gf_bs_new(NULL, 0, GF_BITSTREAM_WRITE);
@@ -112,7 +112,7 @@ GF_Err gp_rtp_builder_do_amr(GP_RTPPacketizer *builder, char *data, u32 data_siz
 		builder->bytesInPacket += size;
 		offset += size;
 		rtp_ts += block_size;
-		assert(builder->bytesInPacket<=builder->Path_MTU);
+		gf_assert(builder->bytesInPacket<=builder->Path_MTU);
 		/*take care of aggregation, flush if needed*/
 		if (builder->last_au_sn==builder->auh_size) rtp_amr_flush(builder);
 	}
@@ -128,7 +128,7 @@ static GFINLINE u8 qes_get_rate_size(u32 idx, const unsigned int *rates, const u
 	return 0;
 }
 
-GF_Err gp_rtp_builder_do_qcelp(GP_RTPPacketizer *builder, char *data, u32 data_size, u8 IsAUEnd, u32 FullAUSize)
+GF_Err gp_rtp_builder_do_qcelp(GP_RTPPacketizer *builder, u8 *data, u32 data_size, u8 IsAUEnd, u32 FullAUSize)
 {
 	u32 offset, rtp_ts;
 	u8 hdr;
@@ -147,6 +147,7 @@ GF_Err gp_rtp_builder_do_qcelp(GP_RTPPacketizer *builder, char *data, u32 data_s
 	while (data_size>offset) {
 		u8 frame_type = data[offset];
 		u8 size = qes_get_rate_size(frame_type, GF_QCELP_RATE_TO_SIZE, GF_QCELP_RATE_TO_SIZE_NB);
+		if (!size) return GF_NON_COMPLIANT_BITSTREAM;
 		/*reserved, not sent)*/
 		if (frame_type>=5) {
 			offset += size;
@@ -177,7 +178,7 @@ GF_Err gp_rtp_builder_do_qcelp(GP_RTPPacketizer *builder, char *data, u32 data_s
 		builder->bytesInPacket += size;
 		offset += size;
 		rtp_ts += 160;
-		assert(builder->bytesInPacket<=builder->Path_MTU);
+		gf_assert(builder->bytesInPacket<=builder->Path_MTU);
 
 		/*take care of aggregation, flush if needed*/
 		builder->last_au_sn++;
@@ -190,12 +191,11 @@ GF_Err gp_rtp_builder_do_qcelp(GP_RTPPacketizer *builder, char *data, u32 data_s
 	return GF_OK;
 }
 
-
 static void rtp_evrc_smv_flush(GP_RTPPacketizer *builder)
 {
 	if (!builder->bytesInPacket) return;
 	if (builder->auh_size>1) {
-		char *hdr;
+		u8 *hdr;
 		u32 hdr_size;
 		/*padding*/
 		if (builder->last_au_sn % 2) gf_bs_write_int(builder->pck_hdr, 0, 4);
@@ -213,7 +213,7 @@ static void rtp_evrc_smv_flush(GP_RTPPacketizer *builder)
 	builder->last_au_sn = 0;
 }
 
-GF_Err gp_rtp_builder_do_smv(GP_RTPPacketizer *builder, char *data, u32 data_size, u8 IsAUEnd, u32 FullAUSize)
+GF_Err gp_rtp_builder_do_smv(GP_RTPPacketizer *builder, u8 *data, u32 data_size, u8 IsAUEnd, u32 FullAUSize)
 {
 	u32 offset, rtp_ts;
 
@@ -244,13 +244,13 @@ GF_Err gp_rtp_builder_do_smv(GP_RTPPacketizer *builder, char *data, u32 data_siz
 			builder->rtp_header.Marker = 0;	/*never set*/
 			builder->rtp_header.SequenceNumber += 1;
 			builder->OnNewPacket(builder->cbk_obj, &builder->rtp_header);
-			assert(builder->pck_hdr==NULL);
+			gf_assert(builder->pck_hdr==NULL);
 
 			if (builder->auh_size>1) {
 				builder->pck_hdr = gf_bs_new(NULL, 0, GF_BITSTREAM_WRITE);
 				/*RRLLLNNN (all 0, no interleaving)*/
 				gf_bs_write_u8(builder->pck_hdr, 0);
-				/*MMM + count-1 : overriden when flushing*/
+				/*MMM + count-1 : overridden when flushing*/
 				gf_bs_write_u8(builder->pck_hdr, 0);
 				builder->bytesInPacket = 2;
 			}
@@ -275,17 +275,16 @@ GF_Err gp_rtp_builder_do_smv(GP_RTPPacketizer *builder, char *data, u32 data_siz
 		builder->bytesInPacket += size;
 		offset += size;
 		rtp_ts += 160;
-		assert(builder->bytesInPacket<=builder->Path_MTU);
+		gf_assert(builder->bytesInPacket<=builder->Path_MTU);
 		/*take care of aggregation, flush if needed*/
 		if (builder->last_au_sn==builder->auh_size) rtp_evrc_smv_flush(builder);
 	}
 	return GF_OK;
 }
 
-GF_Err gp_rtp_builder_do_h263(GP_RTPPacketizer *builder, char *data, u32 data_size, u8 IsAUEnd, u32 FullAUSize)
+GF_Err gp_rtp_builder_do_h263(GP_RTPPacketizer *builder, u8 *data, u32 data_size, u8 IsAUEnd, u32 FullAUSize)
 {
-	GF_BitStream *bs;
-	char hdr[2];
+	u8 hdr[2];
 	Bool Pbit;
 	u32 offset, size, max_size;
 
@@ -302,6 +301,7 @@ GF_Err gp_rtp_builder_do_h263(GP_RTPPacketizer *builder, char *data, u32 data_si
 	max_size = builder->Path_MTU - 2;
 
 	while(data_size > 0) {
+		GF_BitStream *bs;
 		if(data_size > max_size) {
 			size = max_size;
 			builder->rtp_header.Marker = 0;
@@ -338,10 +338,46 @@ GF_Err gp_rtp_builder_do_h263(GP_RTPPacketizer *builder, char *data, u32 data_si
 	return GF_OK;
 }
 
-GF_Err gp_rtp_builder_do_tx3g(GP_RTPPacketizer *builder, char *data, u32 data_size, u8 IsAUEnd, u32 FullAUSize, u32 duration, u8 descIndex)
+GF_Err gp_rtp_builder_do_mp2t(GP_RTPPacketizer *builder, u8 *data, u32 data_size, u8 IsAUEnd, u32 FullAUSize)
+{
+	u32 offset, size, max_size;
+
+	builder->rtp_header.TimeStamp = (u32) builder->sl_header.compositionTimeStamp;
+
+	if (!data) return GF_OK;
+
+	max_size = builder->Path_MTU;
+	offset = 0;
+	while (data_size > 0) {
+		if (data_size > max_size) {
+			size = max_size / 188;
+			size *= 188;
+		} else {
+			size = data_size;
+		}
+
+		data_size -= size;
+
+		/*create new RTP Packet */
+		builder->rtp_header.SequenceNumber += 1;
+		builder->OnNewPacket(builder->cbk_obj, &builder->rtp_header);
+
+		/*add payload*/
+		if (builder->OnDataReference)
+			builder->OnDataReference(builder->cbk_obj, size, offset);
+		else
+			builder->OnData(builder->cbk_obj, data + offset, size, GF_TRUE);
+
+		builder->OnPacketDone(builder->cbk_obj, &builder->rtp_header);
+
+		offset += size;
+	}
+	return GF_OK;
+}
+GF_Err gp_rtp_builder_do_tx3g(GP_RTPPacketizer *builder, u8 *data, u32 data_size, u8 IsAUEnd, u32 FullAUSize, u32 duration, u8 descIndex)
 {
 	GF_BitStream *bs;
-	char *hdr;
+	u8 *hdr;
 	u32 samp_size, txt_size, pay_start, hdr_size, txt_done, cur_frag, nb_frag;
 	Bool is_utf_16 = GF_FALSE;
 
@@ -353,6 +389,8 @@ GF_Err gp_rtp_builder_do_tx3g(GP_RTPPacketizer *builder, char *data, u32 data_si
 		}
 		return GF_OK;
 	}
+	if (data_size<2) return GF_NON_COMPLIANT_BITSTREAM;
+
 	/*cfg packet*/
 	txt_size = data[0];
 	txt_size <<= 8;
@@ -360,6 +398,7 @@ GF_Err gp_rtp_builder_do_tx3g(GP_RTPPacketizer *builder, char *data, u32 data_si
 	/*remove BOM*/
 	pay_start = 2;
 	if (txt_size>2) {
+		if (data_size<4) return GF_NON_COMPLIANT_BITSTREAM;
 		/*seems 3GP only accepts BE UTF-16 (no LE, no UTF32)*/
 		if (((u8) data[2]==(u8) 0xFE) && ((u8) data[3]==(u8) 0xFF)) {
 			is_utf_16 = GF_TRUE;
@@ -374,6 +413,8 @@ GF_Err gp_rtp_builder_do_tx3g(GP_RTPPacketizer *builder, char *data, u32 data_si
 		builder->OnPacketDone(builder->cbk_obj, &builder->rtp_header);
 		builder->bytesInPacket = 0;
 	}
+	//we only deal with static SIDX
+	descIndex += GF_RTP_TX3G_SIDX_OFFSET;
 
 	/*first TTU in packet*/
 	if (!builder->bytesInPacket) {
@@ -544,7 +585,8 @@ GF_Err gp_rtp_builder_do_tx3g(GP_RTPPacketizer *builder, char *data, u32 data_si
 }
 
 
-GF_Err gp_rtp_builder_do_dims(GP_RTPPacketizer *builder, char *data, u32 data_size, u8 IsAUEnd, u32 FullAUSize, u32 duration)
+#if GPAC_ENABLE_3GPP_DIMS_RTP
+GF_Err gp_rtp_builder_do_dims(GP_RTPPacketizer *builder, u8 *data, u32 data_size, u8 IsAUEnd, u32 FullAUSize, u32 duration)
 {
 	u32 frag_state;
 	GF_BitStream *bs;
@@ -655,7 +697,7 @@ GF_Err gp_rtp_builder_do_dims(GP_RTPPacketizer *builder, char *data, u32 data_si
 				builder->bytesInPacket += size;
 			}
 			du_offset += size+size_offset;
-			assert(du_size>= size+size_offset);
+			gf_assert(du_size>= size+size_offset);
 			du_size -= size+size_offset;
 		}
 		offset += orig_size;
@@ -667,6 +709,7 @@ GF_Err gp_rtp_builder_do_dims(GP_RTPPacketizer *builder, char *data, u32 data_si
 	gf_bs_del(bs);
 	return GF_OK;
 }
+#endif
 
 
 
@@ -685,7 +728,7 @@ static void gf_rtp_ac3_flush(GP_RTPPacketizer *builder)
 	builder->ac3_ft = 0;
 }
 
-GF_Err gp_rtp_builder_do_ac3(GP_RTPPacketizer *builder, char *data, u32 data_size, u8 IsAUEnd, u32 FullAUSize)
+GF_Err gp_rtp_builder_do_ac3(GP_RTPPacketizer *builder, u8 *data, u32 data_size, u8 IsAUEnd, u32 FullAUSize)
 {
 	char hdr[2];
 	u32 offset, nb_pck;
@@ -735,7 +778,7 @@ GF_Err gp_rtp_builder_do_ac3(GP_RTPPacketizer *builder, char *data, u32 data_siz
 	}
 
 	/*need fragmentation*/
-	assert(!builder->bytesInPacket);
+	gf_assert(!builder->bytesInPacket);
 	offset = 0;
 	nb_pck = data_size / (builder->Path_MTU-2);
 	if (data_size % (builder->Path_MTU-2)) nb_pck++;
@@ -772,6 +815,33 @@ GF_Err gp_rtp_builder_do_ac3(GP_RTPPacketizer *builder, char *data, u32 data_siz
 		builder->bytesInPacket = 0;
 	}
 
+	return GF_OK;
+}
+
+GF_Err gp_rtp_builder_do_opus(GP_RTPPacketizer *builder, u8 *data, u32 data_size, u8 IsAUEnd, u32 FullAUSize)
+{
+	/*flush*/
+	if (!data) return GF_OK;
+
+	/*fits*/
+	if (data_size > builder->Path_MTU) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_RTP, ("[RTPOpus] Packet size %u larger MTU %u but Opus fragmentation is not yet supported, pacth welcome\n", data_size, builder->Path_MTU ));
+		return GF_NOT_SUPPORTED;
+	}
+	/*send new packet*/
+	builder->rtp_header.TimeStamp = (u32) builder->sl_header.compositionTimeStamp;
+	builder->rtp_header.Marker = 0;
+	builder->rtp_header.SequenceNumber += 1;
+	builder->OnNewPacket(builder->cbk_obj, &builder->rtp_header);
+
+	/*add payload*/
+	if (builder->OnDataReference)
+		builder->OnDataReference(builder->cbk_obj, data_size, 0);
+	else
+		builder->OnData(builder->cbk_obj, data, data_size, GF_FALSE);
+
+	builder->OnPacketDone(builder->cbk_obj, &builder->rtp_header);
+	builder->last_au_sn++;
 	return GF_OK;
 }
 

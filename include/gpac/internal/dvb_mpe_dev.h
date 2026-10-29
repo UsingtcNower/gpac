@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Walid B.H - Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / MPEG2-TS sub-project
@@ -31,7 +31,7 @@
 #include <gpac/internal/reedsolomon.h>
 
 
-#ifndef GPAC_DISABLE_MPEG2TS
+#if !defined(GPAC_DISABLE_MPEG2TS) && !defined(GPAC_DISABLE_NETWORK)
 
 
 /*INT object*/
@@ -119,7 +119,7 @@ typedef struct __gf_dvb_mpe_ip_platform
 
 typedef struct
 {
-	char *data;                        /* Data */
+	u8 *data;                        /* Data */
 	u32 u32_version;                   /* IP version */
 	u32 u32_hdr_length;                /* header length by piece of 4 bytes */
 	u32 u32_total_length;              /* the length of the datagram (hdr+payload) in bytes */
@@ -179,7 +179,7 @@ typedef struct mpe_fec_frame
 
 
 /* Get INT table */
-void gf_m2ts_process_int(GF_M2TS_Demuxer *ts, GF_M2TS_SECTION_ES *ip_table, unsigned char *data, u32 data_size, u32 table_id);
+void gf_m2ts_process_int(GF_M2TS_Demuxer *ts, GF_M2TS_SECTION_ES *ip_table, u8 *data, u32 data_size, u32 table_id);
 
 void section_DSMCC_INT(GF_M2TS_IP_PLATFORM* ip_platform, u8 *data, u32 data_size);
 
@@ -223,12 +223,12 @@ struct tag_m2ts_section_mpe
 };
 
 
-void gf_m2ts_process_mpe(GF_M2TS_Demuxer *ts, GF_M2TS_SECTION_MPE *mpe, unsigned char *data, u32 data_size, u8 table_id);
+void gf_m2ts_process_mpe(GF_M2TS_Demuxer *ts, GF_M2TS_SECTION_MPE *mpe, u8 *data, u32 data_size, u8 table_id);
 void gf_m2ts_gather_ipdatagram_information(MPE_FEC_FRAME *mff,GF_M2TS_Demuxer *ts);
 
 void socket_simu(GF_M2TS_IP_Packet *ip_packet, GF_M2TS_Demuxer *ts, Bool yield);
 
-void gf_m2ts_mpe_send_datagram(GF_M2TS_Demuxer *ts, u32 pid, unsigned char *data, u32 data_size);
+void gf_m2ts_mpe_send_datagram(GF_M2TS_Demuxer *ts, u32 pid, u8 *data, u32 data_size);
 
 /* allocate the necessary memory space*/
 u32 init_frame(MPE_FEC_FRAME * mff, u32 rows);
@@ -260,6 +260,6 @@ typedef enum {
 void descriptor_PRIVATE (u8 *b, DTAG_SCOPE tag_scope, GF_List * descriptors );
 
 
-#endif //GPAC_DISABLE_MPEG2TS
+#endif //!defined(GPAC_DISABLE_MPEG2TS) && !defined(GPAC_DISABLE_NETWORK)
 
 #endif	//_GF_DVB_MPE_DEV_H_

@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2026
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -29,10 +29,8 @@
 #include "visual_manager.h"
 /*for anchor*/
 #include "mpeg4_grouping.h"
-/*for anchor processing, which needs to be filtered at the inline scene level*/
-#include <gpac/internal/terminal_dev.h>
 
-#ifndef GPAC_DISABLE_VRML
+#if !defined(GPAC_DISABLE_VRML) && !defined(GPAC_DISABLE_COMPOSITOR)
 
 /*for event DOM filtering type ...*/
 #include <gpac/scenegraph_svg.h>
@@ -105,9 +103,6 @@ static void TraverseAnchor(GF_Node *node, void *rs, Bool is_destroy)
 		if (url && url->count && url->vals[0].url && strlen(url->vals[0].url) )
 			st->enabled = 1;
 
-		if (!tr_state->visual->compositor->user->EventProc) {
-			st->enabled = 0;
-		}
 		gf_node_dirty_clear(node, GF_SG_NODE_DIRTY);
 	}
 
@@ -147,11 +142,9 @@ static void anchor_activation(GF_Node *node, AnchorStack *st, GF_Compositor *com
 				Bindable_SetSetBind(bindable, 1);
 				break;
 			}
-		} else if (compositor->term) {
+		} else {
 			if (gf_scene_process_anchor(node, &evt))
 				break;
-		} else if (gf_term_send_event(compositor->term, &evt)) {
-			break;
 		}
 		i++;
 	}
@@ -172,23 +165,22 @@ static Bool OnAnchor(GF_SensorHandler *sh, Bool is_over, Bool is_cancel, GF_Even
 		if (!is_cancel) anchor_activation(sh->sensor, st, compositor);
 	} else if (is_over && !st->over) {
 		st->over = 1;
-		if (compositor->user->EventProc) {
-			evt.type = GF_EVENT_NAVIGATE_INFO;
-			switch (gf_node_get_tag(sh->sensor)) {
-			case TAG_MPEG4_Anchor:
-				evt.navigate.to_url = ((M_Anchor *)sh->sensor)->description.buffer;
-				url = & ((M_Anchor *)sh->sensor)->url;
-				break;
+		evt.type = GF_EVENT_NAVIGATE_INFO;
+		switch (gf_node_get_tag(sh->sensor)) {
+		case TAG_MPEG4_Anchor:
+			evt.navigate.to_url = ((M_Anchor *)sh->sensor)->description.buffer;
+			url = & ((M_Anchor *)sh->sensor)->url;
+			break;
 #ifndef GPAC_DISABLE_X3D
-			case TAG_X3D_Anchor:
-				evt.navigate.to_url = ((X_Anchor *)sh->sensor)->description.buffer;
-				url = & ((X_Anchor *)sh->sensor)->url;
-				break;
+		case TAG_X3D_Anchor:
+			evt.navigate.to_url = ((X_Anchor *)sh->sensor)->description.buffer;
+			url = & ((X_Anchor *)sh->sensor)->url;
+			break;
 #endif
-			}
-			if (url && (!evt.navigate.to_url || !strlen(evt.navigate.to_url))) evt.navigate.to_url = url->vals[0].url;
-			gf_term_send_event(compositor->term, &evt);
 		}
+		if (url && (!evt.navigate.to_url || !strlen(evt.navigate.to_url))) evt.navigate.to_url = url->vals[0].url;
+		gf_sc_send_event(compositor, &evt);
+
 	} else if (!is_over) {
 		st->over = 0;
 	}
@@ -264,7 +256,7 @@ static Bool ds_is_enabled(GF_Node *n)
 
 static Bool OnDiscSensor(GF_SensorHandler *sh, Bool is_over, Bool is_cancel, GF_Event *ev, GF_Compositor *compositor)
 {
-	Bool is_mouse = (ev->type<=GF_EVENT_MOUSEWHEEL) ? 1 : 0;
+	Bool is_mouse = (ev->type <= GF_EVENT_LAST_MOUSE) ? 1 : 0;
 	M_DiscSensor *ds = (M_DiscSensor *)sh->sensor;
 	DiscSensorStack *stack = (DiscSensorStack *) gf_node_get_private(sh->sensor);
 
@@ -403,7 +395,7 @@ static Bool ps2D_is_enabled(GF_Node *n)
 
 static Bool OnPlaneSensor2D(GF_SensorHandler *sh, Bool is_over, Bool is_cancel, GF_Event *ev, GF_Compositor *compositor)
 {
-	Bool is_mouse = (ev->type<=GF_EVENT_MOUSEWHEEL) ? 1 : 0;
+	Bool is_mouse = (ev->type <= GF_EVENT_LAST_MOUSE) ? 1 : 0;
 	M_PlaneSensor2D *ps = (M_PlaneSensor2D *)sh->sensor;
 	PS2DStack *stack = (PS2DStack *) gf_node_get_private(sh->sensor);
 
@@ -576,7 +568,7 @@ static Bool OnProximitySensor2D(GF_SensorHandler *sh, Bool is_over, Bool is_canc
 	M_ProximitySensor2D *ps = (M_ProximitySensor2D *)sh->sensor;
 	Prox2DStack *stack = (Prox2DStack *) gf_node_get_private(sh->sensor);
 
-	assert(ps->enabled);
+	gf_assert(ps->enabled);
 
 	if (is_over) {
 		stack->last_time = gf_node_get_scene_time(sh->sensor);
@@ -654,7 +646,7 @@ static Bool ts_is_enabled(GF_Node *n)
 
 static Bool OnTouchSensor(GF_SensorHandler *sh, Bool is_over, Bool is_cancel, GF_Event *ev, GF_Compositor *compositor)
 {
-	Bool is_mouse = (ev->type<=GF_EVENT_MOUSEWHEEL);
+	Bool is_mouse = (ev->type <= GF_EVENT_LAST_MOUSE);
 	M_TouchSensor *ts = (M_TouchSensor *)sh->sensor;
 
 	/*this is not specified in VRML, however we consider that a de-enabled sensor will not sent deactivation events*/
@@ -834,7 +826,7 @@ static Bool ps_is_enabled(GF_Node *n)
 
 static Bool OnPlaneSensor(GF_SensorHandler *sh, Bool is_over, Bool is_cancel, GF_Event *ev, GF_Compositor *compositor)
 {
-	Bool is_mouse = (ev->type<=GF_EVENT_MOUSEWHEEL) ? 1 : 0;
+	Bool is_mouse = (ev->type <= GF_EVENT_LAST_MOUSE) ? 1 : 0;
 	M_PlaneSensor *ps = (M_PlaneSensor *)sh->sensor;
 	PSStack *stack = (PSStack *) gf_node_get_private(sh->sensor);
 
@@ -942,7 +934,7 @@ static Bool OnPlaneSensor(GF_SensorHandler *sh, Bool is_over, Bool is_cancel, GF
 static GF_SensorHandler *plane_sensor_get_handler(GF_Node *n)
 {
 	PSStack *st = (PSStack *)gf_node_get_private(n);
-	return &st->hdl;
+	return st ? &st->hdl : NULL;
 }
 
 void compositor_init_plane_sensor(GF_Compositor *compositor, GF_Node *node)
@@ -990,7 +982,7 @@ static Bool cs_is_enabled(GF_Node *n)
 
 static Bool OnCylinderSensor(GF_SensorHandler *sh, Bool is_over, Bool is_cancel, GF_Event *ev, GF_Compositor *compositor)
 {
-	Bool is_mouse = (ev->type<=GF_EVENT_MOUSEWHEEL) ? 1 : 0;
+	Bool is_mouse = (ev->type <= GF_EVENT_LAST_MOUSE) ? 1 : 0;
 	M_CylinderSensor *cs = (M_CylinderSensor *)sh->sensor;
 	CylinderSensorStack *st = (CylinderSensorStack *) gf_node_get_private(sh->sensor);
 
@@ -1145,7 +1137,7 @@ static Bool OnCylinderSensor(GF_SensorHandler *sh, Bool is_over, Bool is_cancel,
 static GF_SensorHandler *cylinder_sensor_get_handler(GF_Node *n)
 {
 	CylinderSensorStack *st = (CylinderSensorStack  *)gf_node_get_private(n);
-	return &st->hdl;
+	return st ? &st->hdl : NULL ;
 }
 
 void compositor_init_cylinder_sensor(GF_Compositor *compositor, GF_Node *node)
@@ -1193,7 +1185,7 @@ static Bool sphere_is_enabled(GF_Node *n)
 
 static Bool OnSphereSensor(GF_SensorHandler *sh, Bool is_over, Bool is_cancel, GF_Event *ev, GF_Compositor *compositor)
 {
-	Bool is_mouse = (ev->type<=GF_EVENT_MOUSEWHEEL) ? 1 : 0;
+	Bool is_mouse = (ev->type <= GF_EVENT_LAST_MOUSE) ? 1 : 0;
 	M_SphereSensor *sphere = (M_SphereSensor *)sh->sensor;
 	SphereSensorStack *st = (SphereSensorStack *) gf_node_get_private(sh->sensor);
 
@@ -1233,13 +1225,12 @@ static Bool OnSphereSensor(GF_SensorHandler *sh, Bool is_over, Bool is_cancel, G
 				sphere->trackPoint_changed = compositor->hit_local_point;
 				gf_node_event_out(sh->sensor, 5/*"trackPoint_changed"*/);
 			} else {
-				GF_Ray r;
-				r = compositor->hit_world_ray;
-				gf_mx_apply_ray(&compositor->hit_world_to_local, &r);
-				if (!gf_ray_hit_sphere(&r, NULL, st->radius, &compositor->hit_local_point)) {
+				GF_Ray ray = compositor->hit_world_ray;
+				gf_mx_apply_ray(&compositor->hit_world_to_local, &ray);
+				if (!gf_ray_hit_sphere(&ray, NULL, st->radius, &compositor->hit_local_point)) {
 					vec.x = vec.y = vec.z = 0;
 					/*doesn't work properly...*/
-					compositor->hit_local_point = gf_closest_point_to_line(r.orig, r.dir, vec);
+					compositor->hit_local_point = gf_closest_point_to_line(ray.orig, ray.dir, vec);
 				}
 			}
 
@@ -1324,7 +1315,7 @@ static Bool OnSphereSensor(GF_SensorHandler *sh, Bool is_over, Bool is_cancel, G
 static GF_SensorHandler *sphere_get_handler(GF_Node *n)
 {
 	SphereSensorStack *st = (SphereSensorStack *)gf_node_get_private(n);
-	return &st->hdl;
+	return st ? &st->hdl : NULL;
 }
 
 void compositor_init_sphere_sensor(GF_Compositor *compositor, GF_Node *node)
@@ -1490,9 +1481,11 @@ void envtest_evaluate(GF_Node *node, GF_Route *_route)
 	envtest->parameterValue.buffer=NULL;
 
 	smaller = larger = equal = 0;
+	par_value[0] = 0;
 	switch (envtest->parameter) {
 	/*screen aspect ratio*/
 	case 0:
+		if (!compositor) break;
 		if (compositor->display_width>compositor->display_height) {
 			ar = (Float) compositor->display_width;
 			ar /= compositor->display_height;
@@ -1509,11 +1502,13 @@ void envtest_evaluate(GF_Node *node, GF_Route *_route)
 		break;
 	/*screen is portrait */
 	case 1:
+		if (!compositor) break;
 		equal = (compositor->display_width < compositor->display_height) ? 1 : 2;
-		strcpy(par_value, (equal==1) ? "TRUE" : "FALSE");
+		gf_strcpy(par_value, (equal==1) ? "TRUE" : "FALSE");
 		break;
 	/*screen width */
 	case 2:
+		if (!compositor) break;
 		if (envtest->compareValue.buffer && (sscanf(envtest->compareValue.buffer, "%u", &par)==1)) {
 			if (compositor->display_width==par) equal=1;
 			else if (compositor->display_width>par) smaller=1;
@@ -1523,6 +1518,7 @@ void envtest_evaluate(GF_Node *node, GF_Route *_route)
 		break;
 	/*screen width */
 	case 3:
+		if (!compositor) break;
 		if (envtest->compareValue.buffer && (sscanf(envtest->compareValue.buffer, "%u", &par)==1)) {
 			if (compositor->display_height==par) equal=1;
 			else if (compositor->display_height>par) smaller=1;
@@ -1532,6 +1528,7 @@ void envtest_evaluate(GF_Node *node, GF_Route *_route)
 		break;
 	/*screen dpi horizontal */
 	case 4:
+		if (!compositor) break;
 		if (envtest->compareValue.buffer && (sscanf(envtest->compareValue.buffer, "%u", &par)==1)) {
 			if (compositor->video_out->dpi_x==par) equal=1;
 			else if (compositor->video_out->dpi_x>par) smaller=1;
@@ -1541,6 +1538,7 @@ void envtest_evaluate(GF_Node *node, GF_Route *_route)
 		break;
 	/*screen dpi vertical*/
 	case 5:
+		if (!compositor) break;
 		if (envtest->compareValue.buffer && (sscanf(envtest->compareValue.buffer, "%u", &par)==1)) {
 			if (compositor->video_out->dpi_y==par) equal=1;
 			else if (compositor->video_out->dpi_y>par) smaller=1;
@@ -1550,27 +1548,27 @@ void envtest_evaluate(GF_Node *node, GF_Route *_route)
 		break;
 	/*automotive situation - fixme we should use a profile doc ?*/
 	case 6:
-		opt = gf_cfg_get_key(compositor->user->config, "Profile", "Automotive");
+		opt = gf_opts_get_key("Profile", "Automotive");
 		equal = (opt && !strcmp(opt, "yes")) ? 1 : 2;
-		strcpy(par_value, (equal==1) ? "TRUE" : "FALSE");
+		gf_strcpy(par_value, (equal==1) ? "TRUE" : "FALSE");
 		break;
 	/*visually challenged - fixme we should use a profile doc ?*/
 	case 7:
-		opt = gf_cfg_get_key(compositor->user->config, "Profile", "VisuallyChallenged");
+		opt = gf_opts_get_key("Profile", "VisuallyChallenged");
 		equal = (opt && !strcmp(opt, "yes")) ? 1 : 2;
-		strcpy(par_value, (equal==1) ? "TRUE" : "FALSE");
+		gf_strcpy(par_value, (equal==1) ? "TRUE" : "FALSE");
 		break;
 	/*has touch - fixme we should find out by ourselves*/
 	case 8:
-		opt = gf_cfg_get_key(compositor->user->config, "Profile", "HasTouchScreen");
+		opt = gf_opts_get_key("Profile", "HasTouchScreen");
 		equal = (!opt || !strcmp(opt, "yes")) ? 1 : 2;
-		strcpy(par_value, (equal==1) ? "TRUE" : "FALSE");
+		gf_strcpy(par_value, (equal==1) ? "TRUE" : "FALSE");
 		break;
 	/*has key - fixme we should find out by ourselves*/
 	case 9:
-		opt = gf_cfg_get_key(compositor->user->config, "Profile", "HasKeyPad");
+		opt = gf_opts_get_key("Profile", "HasKeyPad");
 		equal = (!opt || !strcmp(opt, "yes")) ? 1 : 2;
-		strcpy(par_value, (equal==1) ? "TRUE" : "FALSE");
+		gf_strcpy(par_value, (equal==1) ? "TRUE" : "FALSE");
 		break;
 	}
 
@@ -1620,6 +1618,11 @@ void compositor_evaluate_envtests(GF_Compositor *compositor, u32 param_type)
 	}
 }
 
+void compositor_envtest_modified(GF_Node *node)
+{
+	envtest_evaluate(node, NULL);
+}
+
 void compositor_init_envtest(GF_Compositor *compositor, GF_Node *node)
 {
 	M_EnvironmentTest *envtest = (M_EnvironmentTest *)node;
@@ -1628,12 +1631,14 @@ void compositor_init_envtest(GF_Compositor *compositor, GF_Node *node)
 	gf_node_set_callback_function(node, traverse_envtest);
 
 	envtest->on_evaluate = envtest_evaluate;
+
+#ifdef GPAC_ENABLE_COVERAGE
+	if (gf_sys_is_cov_mode()) {
+		compositor_envtest_modified(node);
+	}
+#endif
 }
 
-void compositor_envtest_modified(GF_Node *node)
-{
-	envtest_evaluate(node, NULL);
-}
 
 
-#endif /*GPAC_DISABLE_VRML*/
+#endif //!defined(GPAC_DISABLE_VRML) && !defined(GPAC_DISABLE_COMPOSITOR)

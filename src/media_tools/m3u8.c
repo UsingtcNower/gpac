@@ -1,8 +1,8 @@
-/**
+/*
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Pierre Souchay, Jean Le Feuvre, Romain Bouqueau
- *			Copyright (c) Telecom ParisTech 2010-2012, Romain Bouqueau
+ *			Copyright (c) Telecom ParisTech 2010-2026
  *					All rights reserved
  *
  *  This file is part of GPAC
@@ -40,21 +40,25 @@ typedef struct _s_accumulated_attributes {
 	int stream_id;
 	char *codecs;
 	char *language;
+	char *name;
+	u32 channels;
 	MediaType type;
-	union {
-		char *audio;
-		char *video;
-		char *subtitle;
-		char *closed_captions;
-	} group;
+	char *group_audio;
+	char *group_video;
+	char *group_subtitle;
+	char *group_closed_captions;
+	Bool forced;
+
 	int target_duration_in_seconds;
 	int min_media_sequence;
 	int current_media_seq;
-	int version;
-	int compatibility_version; /*compute version required by the M3U8 content*/
+	u32 version;
+	u32 compatibility_version; /*compute version required by the M3U8 content*/
 	Bool is_master_playlist;
 	Bool is_media_segment;
 	Bool is_playlist_ended;
+	Bool is_default;
+	Bool is_autoselect;
 	u64 playlist_utc_timestamp;
 	u64 byte_range_start, byte_range_end;
 	u64 init_byte_range_start, init_byte_range_end;
@@ -62,7 +66,10 @@ typedef struct _s_accumulated_attributes {
 	char *init_url;
 	char *key_url;
 	bin128 key_iv;
-	Bool independant_segments;
+	Bool has_iv;
+	Bool independent_segments;
+	Bool low_latency, independent_part;
+	u32 discontinuity;
 } s_accumulated_attributes;
 
 
@@ -100,6 +107,9 @@ GF_Err playlist_element_del(PlaylistElement * e) {
 	if (e->language) {
 		gf_free(e->language);
 	}
+	if (e->name) {
+		gf_free(e->name);
+	}
 	if (e->audio_group) {
 		gf_free(e->audio_group);
 	}
@@ -109,8 +119,17 @@ GF_Err playlist_element_del(PlaylistElement * e) {
 	if (e->key_uri) {
 		gf_free(e->key_uri);
 	}
+	if (e->init_segment_url) {
+		gf_free(e->init_segment_url);
+	}
+	if (e->alt_bandwidths) {
+		gf_free(e->alt_bandwidths);
+	}
+	if (e->main_codecs) {
+		gf_free(e->main_codecs);
+	}
 	memset(e->key_iv, 0, sizeof(bin128) );
-	if (e->url) 
+	if (e->url)
 		gf_free(e->url);
 
 	switch (e->element_type) {
@@ -118,7 +137,7 @@ GF_Err playlist_element_del(PlaylistElement * e) {
 	case TYPE_MEDIA:
 		break;
 	case TYPE_PLAYLIST:
-		assert(e->element.playlist.elements);
+		gf_assert(e->element.playlist.elements);
 		result |= cleanup_list_of_elements(e->element.playlist.elements);
 	default:
 		break;
@@ -130,7 +149,7 @@ GF_Err playlist_element_del(PlaylistElement * e) {
 /**
  * Creates an Playlist element.
  * This element can be either a playlist of a stream according to first parameter.
- * \return NULL if element could not be created. Elements will be deleted recursively.
+ * \return The PlaylistElement or NULL if it could not be created. Elements will be deleted recursively.
  */
 static PlaylistElement* playlist_element_new(PlaylistElementType element_type, const char *url, s_accumulated_attributes *attribs)
 {
@@ -143,20 +162,37 @@ static PlaylistElement* playlist_element_new(PlaylistElementType element_type, c
 	e->duration_info = attribs->duration_in_seconds;
 	e->byte_range_start = attribs->byte_range_start;
 	e->byte_range_end = attribs->byte_range_end;
+	e->low_lat_chunk = attribs->low_latency;
+	e->independent_chunk = attribs->independent_part;
 
 	e->title = (attribs->title ? gf_strdup(attribs->title) : NULL);
 	e->codecs = (attribs->codecs ? gf_strdup(attribs->codecs) : NULL);
 	e->language = (attribs->language ? gf_strdup(attribs->language) : NULL);
+	e->name = (attribs->name ? gf_strdup(attribs->name) : NULL);
 	e->drm_method = attribs->key_method;
 	e->init_segment_url = attribs->init_url ? gf_strdup(attribs->init_url) : NULL;
 	e->init_byte_range_start = attribs->init_byte_range_start;
 	e->init_byte_range_end = attribs->init_byte_range_end;
-	e->key_uri = (attribs->key_url ? gf_strdup(attribs->key_url) : NULL);
-	memcpy(e->key_iv, attribs->key_iv, sizeof(bin128));
+
+	if (e->drm_method) {
+		e->key_uri = NULL;
+		if (attribs->key_url) {
+			e->key_uri = gf_strdup(attribs->key_url);
+		}
+
+		if (attribs->has_iv) {
+			memcpy(e->key_iv, attribs->key_iv, sizeof(bin128));
+		} else {
+			u32 iv = gf_htonl(attribs->current_media_seq);
+			memset(e->key_iv, 0, sizeof(bin128) );
+			memcpy(e->key_iv + 12, (const void *) &iv, sizeof(iv));
+		}
+	}
 
 	e->utc_start_time = attribs->playlist_utc_timestamp;
+	e->discontinuity = attribs->discontinuity;
 
-	assert(url);
+	gf_assert(url);
 	e->url = gf_strdup(url);
 	e->bandwidth = 0;
 	e->element_type = element_type;
@@ -168,38 +204,14 @@ static PlaylistElement* playlist_element_new(PlaylistElementType element_type, c
 		e->element.playlist.media_seq_max = 0;
 		e->element.playlist.elements = gf_list_new();
 		if (NULL == (e->element.playlist.elements)) {
-			if (e->title)
-				gf_free(e->title);
-			if (e->codecs)
-				gf_free(e->codecs);
-			if (e->language)
-				gf_free(e->language);
-			if (e->audio_group)
-				gf_free(e->audio_group);
-			if (e->video_group)
-				gf_free(e->video_group);
-			if (e->url)
-				gf_free(e->url);
-			if (e->init_segment_url)
-				gf_free(e->init_segment_url);
-			if (e->key_uri)
-				gf_free(e->key_uri);
-			e->url = NULL;
-			e->title = NULL;
-			e->codecs = NULL;
-			e->language = NULL;
-			e->audio_group = NULL;
-			e->video_group = NULL;
-			e->key_uri = NULL;
-			memset(e->key_iv, 0, sizeof(bin128));
-			gf_free(e);
+			playlist_element_del(e);
 			return NULL;
 		}
 	} else {
 		/* Nothing to do, media is an empty structure */
 	}
-	assert(e->bandwidth == 0);
-	assert(e->url);
+	gf_assert(e->bandwidth == 0);
+	gf_assert(e->url);
 	return e;
 }
 
@@ -249,7 +261,7 @@ static GFINLINE int string2num(const char *s) {
 	u64 ret=0, i, shift=2;
 	u8 hash[GF_SHA1_DIGEST_SIZE];
 	gf_sha1_csum((u8*)s, (u32)strlen(s), hash);
-	assert(shift*GF_SHA1_DIGEST_SIZE < 64);
+	gf_assert(shift*GF_SHA1_DIGEST_SIZE < 64);
 	for (i=0; i<GF_SHA1_DIGEST_SIZE; ++i)
 		ret += (ret << shift) + hash[i];
 	return (int)(ret % MEDIA_TYPE_AUDIO);
@@ -260,7 +272,7 @@ static GFINLINE int string2num(const char *s) {
 	MEDIA_TYPE_##type + \
 	string2num(group_id) \
 	) \
- 
+
 static Bool safe_start_equals(const char *attribute, const char *line) {
 	size_t len, atlen;
 	if (line == NULL)
@@ -294,6 +306,9 @@ static char** extract_attributes(const char *name, const char *line, const int n
 	if (!safe_start_equals(name, line))
 		return NULL;
 	ret = gf_calloc((num_attributes + 1), sizeof(char*));
+	if (!ret) return NULL;
+	if (!num_attributes) return ret;
+
 	curr_attribute = 0;
 	for (i=start; i<=len; i++) {
 		if (line[i] == '\0' || (!quote && line[i] == ',')  || (line[i] == quote)) {
@@ -301,21 +316,25 @@ static char** extract_attributes(const char *name, const char *line, const int n
 			sz = i - start;
 			if (quote && (line[i] == quote))
 				sz++;
-			
+
 			while (line[start+spaces] == ' ')
 				spaces++;
 			if ((sz-spaces<=1) && (line[start+spaces]==',')) {
-				start = i+1;
+				//start = i+1;
 			} else {
 				if (!strncmp(&line[start+spaces], "\t", sz-spaces) || !strncmp(&line[start+spaces], "\n", sz-spaces)) {
 				} else {
-					ret[curr_attribute] = gf_calloc( (1+sz-spaces), sizeof(char));
-					strncpy(ret[curr_attribute], &(line[start+spaces]), sz-spaces);
+					ret[curr_attribute] = gf_malloc( (1+sz-spaces) * sizeof(char));
+					memcpy(ret[curr_attribute], &(line[start+spaces]), sz-spaces);
+					ret[curr_attribute][sz-spaces] = 0;
+
 					curr_attribute++;
+					if (curr_attribute >= num_attributes)
+						break;
 				}
 			}
 			start = i+1;
-			
+
 			if (start == len) {
 				return ret;
 			}
@@ -339,15 +358,22 @@ static char** extract_attributes(const char *name, const char *line, const int n
 	if (v > attributes->compatibility_version) \
 		attributes->compatibility_version = v;
 
+static void free_attrs(char** attributes)
+{
+	u32 i = 0;
+	while (attributes[i] != NULL) {
+		gf_free(attributes[i]);
+		i++;
+	}
+	gf_free(attributes);
+}
 /**
  * Parses the attributes and accumulate into the attributes structure
  */
 static char** parse_attributes(const char *line, s_accumulated_attributes *attributes) {
 	int int_value, i;
-	double double_value;
 	char **ret;
 	char *end_ptr;
-	char *utility;
 	if (line == NULL)
 		return NULL;
 	if (!safe_start_equals("#EXT", line))
@@ -404,7 +430,7 @@ static char** parse_attributes(const char *line, s_accumulated_attributes *attri
 		/* #EXTINF:<duration>,<title> */
 		attributes->is_media_segment = GF_TRUE;
 		if (ret[0]) {
-			double_value = strtod(ret[0], &end_ptr);
+			double double_value = strtod(ret[0], &end_ptr);
 			if (end_ptr != ret[0]) {
 				attributes->duration_in_seconds = double_value;
 			}
@@ -413,6 +439,7 @@ static char** parse_attributes(const char *line, s_accumulated_attributes *attri
 			}
 		}
 		if (ret[1]) {
+			if (attributes->title) gf_free(attributes->title);
 			attributes->title = gf_strdup(ret[1]);
 		}
 		return ret;
@@ -423,15 +450,50 @@ static char** parse_attributes(const char *line, s_accumulated_attributes *attri
 		const char *method = "METHOD=";
 		const size_t method_len = strlen(method);
 		if (safe_start_equals(method, ret[0])) {
-			if (strncmp(ret[0]+method_len, "NONE", 4)) {
-				GF_LOG(GF_LOG_WARNING, GF_LOG_DASH,("[M3U8] EXT-X-KEY not supported.\n", line));
+			if (!strncmp(ret[0]+method_len, "NONE", 4)) {
+				attributes->key_method = DRM_NONE;
+				if (attributes->key_url) {
+					gf_free(attributes->key_url);
+					attributes->key_url = NULL;
+				}
+			} else if (!strncmp(ret[0]+method_len, "AES-128", 7)) {
+				attributes->key_method = DRM_AES_128;
+			} else if (!strncmp(ret[0]+method_len, "SAMPLE-AES", 10)) {
+				attributes->key_method = DRM_CENC_CBCS;
+			} else if (!strncmp(ret[0]+method_len, "SAMPLE-AES-CTR", 14)) {
+				attributes->key_method = DRM_CENC_CTR;
+			} else {
+				GF_LOG(GF_LOG_ERROR, GF_LOG_DASH,("[M3U8] EXT-X-KEY method not recognized.\n"));
 			}
-			attributes->key_method = DRM_AES_128;
 			if (ret[1] != NULL && safe_start_equals("URI=\"", ret[1])) {
 				int_value = (u32) strlen(ret[1]);
 				if (ret[1][int_value-1] == '"') {
-					attributes->key_url = gf_strdup(&(ret[1][4]));
+					if (attributes->key_url) gf_free(attributes->key_url);
+					attributes->key_url = gf_strdup(&(ret[1][5]));
+					if (attributes->key_url) {
+						u32 klen = (u32) strlen(attributes->key_url);
+						attributes->key_url[klen ? klen-1 : 0] = 0;
+					}
 				}
+			}
+			attributes->has_iv = GF_FALSE;
+			if (ret[2] != NULL && safe_start_equals("IV=", ret[2])) {
+				char *IV = ret[2] + 3;
+				if (!strncmp(IV, "0x", 2)) IV+=2;
+				if (strlen(IV) != 32) {
+					GF_LOG(GF_LOG_ERROR, GF_LOG_DASH,("[M3U8] EXT-X-KEY wrong IV len\n"));
+				} else {
+					for (i=0; i<16; i++) {
+						char szV[3];
+						u32 v;
+						szV[0] = IV[2*i];
+						szV[1] = IV[2*i + 1];
+						szV[2] = 0;
+						sscanf(szV, "%X", &v);
+						attributes->key_iv[i] = v;
+					}
+				}
+				attributes->has_iv = GF_TRUE;
 			}
 		}
 		M3U8_COMPATIBILITY_VERSION(1);
@@ -467,9 +529,12 @@ static char** parse_attributes(const char *line, s_accumulated_attributes *attri
 			if (safe_start_equals("URI=\"", val)) {
 				char *uri = val + 5;
 				int_value = (u32) strlen(uri);
-				if (uri[int_value-1] == '"') {
+				if (int_value > 0 && uri[int_value-1] == '"') {
+					if (attributes->init_url) gf_free(attributes->init_url);
 					attributes->init_url = gf_strdup(uri);
 					attributes->init_url[int_value-1]=0;
+				} else {
+					GF_LOG(GF_LOG_ERROR, GF_LOG_DASH,("[M3U8] Invalid URI (%s) in EXT-X-MAP\n", val));
 				}
 			}
 			else if (safe_start_equals("BYTERANGE=\"", val)) {
@@ -496,6 +561,7 @@ static char** parse_attributes(const char *line, s_accumulated_attributes *attri
 		attributes->is_master_playlist = GF_TRUE;
 		M3U8_COMPATIBILITY_VERSION(1);
 		while (ret[i] != NULL) {
+			char *utility;
 			if (safe_start_equals("BANDWIDTH=", ret[i])) {
 				utility = &(ret[i][10]);
 				int_value = (s32) strtol(utility, &end_ptr, 10);
@@ -509,7 +575,9 @@ static char** parse_attributes(const char *line, s_accumulated_attributes *attri
 			} else if (safe_start_equals("CODECS=\"", ret[i])) {
 				int_value = (u32) strlen(ret[i]);
 				if (ret[i][int_value-1] == '"') {
-					attributes->codecs = gf_strdup(&(ret[i][7]));
+					if (attributes->codecs) gf_free(attributes->codecs);
+					attributes->codecs = gf_strdup(&(ret[i][8]));
+					if (attributes->codecs[0]) attributes->codecs[strlen(attributes->codecs)-1] = 0;
 				}
 			} else if (safe_start_equals("RESOLUTION=", ret[i])) {
 				u32 w, h;
@@ -520,28 +588,40 @@ static char** parse_attributes(const char *line, s_accumulated_attributes *attri
 				}
 				M3U8_COMPATIBILITY_VERSION(2);
 			} else if (safe_start_equals("AUDIO=", ret[i])) {
-				assert(attributes->type == MEDIA_TYPE_UNKNOWN);
+				gf_assert(attributes->type == MEDIA_TYPE_UNKNOWN);
 				attributes->type = MEDIA_TYPE_AUDIO;
-				attributes->group.audio = gf_strdup(ret[i] + 6);
+				if (attributes->group_audio) gf_free(attributes->group_audio);
+				attributes->group_audio = gf_strdup(ret[i] + 6);
 				M3U8_COMPATIBILITY_VERSION(4);
 			} else if (safe_start_equals("VIDEO=", ret[i])) {
-				assert(attributes->type == MEDIA_TYPE_UNKNOWN);
+				gf_assert(attributes->type == MEDIA_TYPE_UNKNOWN);
 				attributes->type = MEDIA_TYPE_VIDEO;
-				attributes->group.video = gf_strdup(ret[i] + 6);
+				if (attributes->group_video) gf_free(attributes->group_video);
+				attributes->group_video = gf_strdup(ret[i] + 6);
 				M3U8_COMPATIBILITY_VERSION(4);
 			}
 			i++;
 		}
 		if (!attributes->bandwidth) {
 			GF_LOG(GF_LOG_WARNING, GF_LOG_DASH,("[M3U8] Invalid #EXT-X-STREAM-INF: no BANDWIDTH found. Ignoring the line.\n"));
+			free_attrs(ret);
 			return NULL;
 		}
 		return ret;
 	}
-	ret = extract_attributes("#EXT-X-DISCONTINUITY", line, 0);
+	if (!strcmp(line, "#EXT-X-DISCONTINUITY") ) {
+		attributes->discontinuity += 1;
+		M3U8_COMPATIBILITY_VERSION(1);
+		return ret;
+	}
+	ret = extract_attributes("#EXT-X-DISCONTINUITY-SEQUENCE:", line, 1);
 	if (ret) {
-		/* #EXT-X-DISCONTINUITY */
-		GF_LOG(GF_LOG_WARNING, GF_LOG_DASH,("[M3U8] EXT-X-DISCONTINUITY not supported.\n", line));
+		if (ret[0]) {
+			int_value = (s32)strtol(ret[0], &end_ptr, 10);
+			if (end_ptr != ret[0]) {
+				attributes->discontinuity = int_value;
+			}
+		}
 		M3U8_COMPATIBILITY_VERSION(1);
 		return ret;
 	}
@@ -567,6 +647,11 @@ static char** parse_attributes(const char *line, s_accumulated_attributes *attri
 		/* #EXT-X-MEDIA:[TYPE={AUDIO,VIDEO}],[URI],[GROUP-ID],[LANGUAGE],[NAME],[DEFAULT={YES,NO}],[AUTOSELECT={YES,NO}] */
 		M3U8_COMPATIBILITY_VERSION(4);
 		attributes->is_master_playlist = GF_TRUE;
+		attributes->bandwidth = 0;
+		attributes->width = 0;
+		attributes->height = 0;
+		attributes->channels = 0;
+		attributes->forced = GF_FALSE;
 		i = 0;
 		while (ret[i] != NULL) {
 			if (safe_start_equals("TYPE=", ret[i])) {
@@ -583,6 +668,7 @@ static char** parse_attributes(const char *line, s_accumulated_attributes *attri
 				}
 			} else if (safe_start_equals("URI=\"", ret[i])) {
 				size_t len;
+				if (attributes->mediaURL) gf_free(attributes->mediaURL);
 				attributes->mediaURL = gf_strdup(ret[i]+5);
 				len = strlen(attributes->mediaURL);
 				if (len && (attributes->mediaURL[len-1] == '"')) {
@@ -592,58 +678,74 @@ static char** parse_attributes(const char *line, s_accumulated_attributes *attri
 				}
 			} else if (safe_start_equals("GROUP-ID=", ret[i])) {
 				if (attributes->type == MEDIA_TYPE_AUDIO) {
-					attributes->group.audio = gf_strdup(ret[i]+9);
-					attributes->stream_id = GROUP_ID_TO_PROGRAM_ID(AUDIO, attributes->group.audio);
+					if (attributes->group_audio) gf_free(attributes->group_audio);
+					attributes->group_audio = gf_strdup(ret[i]+9);
+					attributes->stream_id = GROUP_ID_TO_PROGRAM_ID(AUDIO, attributes->group_audio);
 				} else if (attributes->type == MEDIA_TYPE_VIDEO) {
-					attributes->group.video = gf_strdup(ret[i]+9);
-					attributes->stream_id = GROUP_ID_TO_PROGRAM_ID(VIDEO, attributes->group.video);
+					if (attributes->group_video) gf_free(attributes->group_video);
+					attributes->group_video = gf_strdup(ret[i]+9);
+					attributes->stream_id = GROUP_ID_TO_PROGRAM_ID(VIDEO, attributes->group_video);
 				} else if (attributes->type == MEDIA_TYPE_SUBTITLES) {
-					attributes->group.subtitle = gf_strdup(ret[i]+9);
-					attributes->stream_id = GROUP_ID_TO_PROGRAM_ID(SUBTITLES, attributes->group.subtitle);
+					if (attributes->group_subtitle) gf_free(attributes->group_subtitle);
+					attributes->group_subtitle = gf_strdup(ret[i]+9);
+					attributes->stream_id = GROUP_ID_TO_PROGRAM_ID(SUBTITLES, attributes->group_subtitle);
 				} else if (attributes->type == MEDIA_TYPE_CLOSED_CAPTIONS) {
-					attributes->group.subtitle = gf_strdup(ret[i]+9);
-					attributes->stream_id = GROUP_ID_TO_PROGRAM_ID(CLOSED_CAPTIONS, attributes->group.subtitle);
+					if (attributes->group_closed_captions) gf_free(attributes->group_closed_captions);
+					attributes->group_closed_captions = gf_strdup(ret[i]+9);
+					attributes->stream_id = GROUP_ID_TO_PROGRAM_ID(CLOSED_CAPTIONS, attributes->group_closed_captions);
 				} else if (attributes->type == MEDIA_TYPE_UNKNOWN) {
 					GF_LOG(GF_LOG_ERROR, GF_LOG_DASH,("[M3U8] Invalid #EXT-X-MEDIA:GROUP-ID=%s. Ignoring the line.\n", ret[i]+9));
+					free_attrs(ret);
 					return NULL;
 				}
 			} else if (safe_start_equals("LANGUAGE=\"", ret[i])) {
 				size_t len;
-				attributes->language = gf_strdup(ret[i]+9);
+				u32 offset=9;
+				if (ret[i][9] == '"') offset++;
+				if (attributes->language) gf_free(attributes->language);
+				attributes->language = gf_strdup(ret[i]+offset);
 				len = strlen(attributes->language);
 				if (len && (attributes->language[len-1] == '"')) {
 					attributes->language[len-1] = '\0';
 				} else {
 					GF_LOG(GF_LOG_WARNING, GF_LOG_DASH,("[M3U8] Misformed #EXT-X-MEDIA:LANGUAGE=%s. Quotes are incorrect.\n", ret[i]+5));
 				}
-			} else if (safe_start_equals("NAME=", ret[i])) {
-				GF_LOG(GF_LOG_INFO, GF_LOG_DASH,("[M3U8] EXT-X-MEDIA:NAME not supported\n"));
-				//attributes->name = gf_strdup(ret[i]+5);
+			} else if (safe_start_equals("NAME=\"", ret[i])) {
+				if (attributes->name) gf_free(attributes->name);
+				attributes->name = gf_strdup(ret[i]+5+1);
+				u32 len = (u32) strlen(attributes->name);
+				if (len) attributes->name[len-1]=0;
 			} else if (safe_start_equals("DEFAULT=", ret[i])) {
-				GF_LOG(GF_LOG_INFO, GF_LOG_DASH,("[M3U8] EXT-X-MEDIA:DEFAULT not supported\n"));
 				if (!strncmp(ret[i]+8, "YES", 3)) {
-					//TODO
+					attributes->is_default = GF_TRUE;
 				} else if (!strncmp(ret[i]+8, "NO", 2)) {
-					//TODO
+					attributes->is_default = GF_FALSE;
 				} else {
 					GF_LOG(GF_LOG_WARNING, GF_LOG_DASH,("[M3U8] Invalid #EXT-X-MEDIA:DEFAULT=%s\n", ret[i]+8));
 				}
 			} else if (safe_start_equals("AUTOSELECT=", ret[i])) {
-				GF_LOG(GF_LOG_INFO, GF_LOG_DASH,("[M3U8] EXT-X-MEDIA:AUTOSELECT not supported\n"));
 				if (!strncmp(ret[i]+11, "YES", 3)) {
-					//TODO
+					attributes->is_autoselect = GF_TRUE;
 				} else if (!strncmp(ret[i]+11, "NO", 2)) {
-					//TODO
+					attributes->is_autoselect = GF_TRUE;
 				} else {
 					GF_LOG(GF_LOG_WARNING, GF_LOG_DASH,("[M3U8] Invalid #EXT-X-MEDIA:AUTOSELECT=%s\n", ret[i]+11));
 				}
+			} else if (safe_start_equals("CHANNELS=", ret[i])) {
+				sscanf(ret[i] + 9, "\"%u\"", &attributes->channels);
+			} else if (safe_start_equals("INSTREAM-ID=", ret[i])) {
+				//we don't signal CC for now
+			} else if (safe_start_equals("FORCED=", ret[i])) {
+				attributes->forced = !stricmp(ret[i] + 7, "yes") ? GF_TRUE : GF_FALSE;
+			} else {
+				GF_LOG(GF_LOG_WARNING, GF_LOG_DASH,("[M3U8] Attribute %s not supported\n", ret[i]));
 			}
-
 			i++;
 		}
 
 		if (attributes->type == MEDIA_TYPE_UNKNOWN) {
 			GF_LOG(GF_LOG_WARNING, GF_LOG_DASH,("[M3U8] Invalid #EXT-X-MEDIA: TYPE is missing. Ignoring the line.\n"));
+			free_attrs(ret);
 			return NULL;
 		}
 		if (attributes->type == MEDIA_TYPE_CLOSED_CAPTIONS && attributes->mediaURL) {
@@ -651,20 +753,22 @@ static char** parse_attributes(const char *line, s_accumulated_attributes *attri
 			gf_free(attributes->mediaURL);
 			attributes->mediaURL = NULL;
 		}
-		if ((attributes->type == MEDIA_TYPE_AUDIO && !attributes->group.audio)
-		        || (attributes->type == MEDIA_TYPE_VIDEO && !attributes->group.video)) {
+		if ((attributes->type == MEDIA_TYPE_AUDIO && !attributes->group_audio)
+		        || (attributes->type == MEDIA_TYPE_VIDEO && !attributes->group_video)) {
 			GF_LOG(GF_LOG_WARNING, GF_LOG_DASH,("[M3U8] Invalid #EXT-X-MEDIA: missing GROUP-ID attribute. Ignoring the line.\n"));
+			free_attrs(ret);
 			return NULL;
 		}
 		if (!attributes->stream_id) {
 			GF_LOG(GF_LOG_WARNING, GF_LOG_DASH,("[M3U8] Invalid #EXT-X-MEDIA: no ID was computed. Check previous errors. Ignoring the line.\n"));
+			free_attrs(ret);
 			return NULL;
 		}
 
 		return ret;
 	}
 	if (!strncmp(line, "#EXT-X-INDEPENDENT-SEGMENTS", strlen("#EXT-X-INDEPENDENT-SEGMENTS") )) {
-		attributes->independant_segments = GF_TRUE;
+		attributes->independent_segments = GF_TRUE;
 		M3U8_COMPATIBILITY_VERSION(1);
 		return NULL;
 	}
@@ -672,17 +776,43 @@ static char** parse_attributes(const char *line, s_accumulated_attributes *attri
 		//todo extract I/intra rate for speed adaptation
 		return NULL;
 	}
-	GF_LOG(GF_LOG_WARNING, GF_LOG_DASH,("[M3U8] Unknown line in M3U8 file %s\n", line));
+	//ignored for now
+	if (!strncmp(line, "#EXT-X-BITRATE", strlen("#EXT-X-BITRATE") )) {
+		return NULL;
+	}
+	if (!strncmp(line, "#EXT-X-PART-INF", strlen("#EXT-X-PART-INF") )) {
+		attributes->low_latency = GF_TRUE;
+		return NULL;
+	}
+	//TODO for now we don't use preload hint
+	if (!strncmp(line, "#EXT-X-SERVER-CONTROL", strlen("#EXT-X-SERVER-CONTROL") )) {
+		return NULL;
+	}
+	//TODO for now we don't use preload hint
+	if (!strncmp(line, "#EXT-X-PRELOAD-HINT", strlen("#EXT-X-PRELOAD-HINT") )) {
+		return NULL;
+	}
+	//TODO for now we don't use preload hint
+	if (!strncmp(line, "#EXT-X-RENDITION-REPORT", strlen("#EXT-X-RENDITION-REPORT") )) {
+		return NULL;
+	}
+	//TODO for now we don't support interstitials
+	if (!strncmp(line, "#EXT-X-DATERANGE", strlen("#EXT-X-DATERANGE") )) {
+		return NULL;
+	}
+	GF_LOG(GF_LOG_WARNING, GF_LOG_DASH,("[M3U8] Unsupported directive %s\n", line));
 	return NULL;
 }
 
 /**
  * Creates a new MasterPlaylist
- * \return NULL if MasterPlaylist element could not be allocated
+\return NULL if MasterPlaylist element could not be allocated
  */
 MasterPlaylist* master_playlist_new()
 {
-	MasterPlaylist *pl = (MasterPlaylist*)gf_malloc(sizeof(MasterPlaylist));
+	MasterPlaylist *pl;
+	GF_SAFEALLOC(pl, MasterPlaylist);
+
 	if (pl == NULL)
 		return NULL;
 	pl->streams = gf_list_new();
@@ -701,13 +831,12 @@ MasterPlaylist* master_playlist_new()
 GF_Err gf_m3u8_master_playlist_del(MasterPlaylist **playlist) {
 	if ((playlist == NULL) || (*playlist == NULL))
 		return GF_OK;
-	assert((*playlist)->streams);
+	gf_assert((*playlist)->streams);
 	while (gf_list_count((*playlist)->streams)) {
 		Stream *p = gf_list_get((*playlist)->streams, 0);
-		assert(p);
-		while (gf_list_count(p->variants)) {
+		while (p && gf_list_count(p->variants)) {
 			PlaylistElement *pl = gf_list_get(p->variants, 0);
-			assert(pl);
+			if (!pl) break;
 			playlist_element_del(pl);
 			gf_list_rem(p->variants, 0);
 		}
@@ -726,13 +855,13 @@ GF_Err gf_m3u8_master_playlist_del(MasterPlaylist **playlist) {
 
 static Stream* master_playlist_find_matching_stream(const MasterPlaylist *pl, const u32 stream_id) {
 	u32 count, i;
-	assert(pl);
-	assert(pl->streams);
-	assert(stream_id >= 0);
+	gf_assert(pl);
+	gf_assert(pl->streams);
+	gf_assert(stream_id >= 0);
 	count = gf_list_count(pl->streams);
 	for (i=0; i<count; i++) {
 		Stream *cur = gf_list_get(pl->streams, i);
-		assert(cur);
+		gf_assert(cur);
 		if (stream_id == cur->stream_id) {
 			/* We found the program */
 			return cur;
@@ -749,30 +878,27 @@ static Stream* master_playlist_find_matching_stream(const MasterPlaylist *pl, co
 GF_EXPORT
 GF_Err gf_m3u8_parse_master_playlist(const char *file, MasterPlaylist **playlist, const char *baseURL)
 {
-	return gf_m3u8_parse_sub_playlist(file, playlist, baseURL, NULL, NULL);
+#ifdef GPAC_ENABLE_COVERAGE
+	if (gf_sys_is_cov_mode()) {
+		string2num("coverage");
+	}
+#endif
+	return gf_m3u8_parse_sub_playlist(file, playlist, baseURL, NULL, NULL, GF_TRUE);
 }
 
 GF_Err declare_sub_playlist(char *currentLine, const char *baseURL, s_accumulated_attributes *attribs, PlaylistElement *sub_playlist, MasterPlaylist **playlist, Stream *in_stream)
 {
-	u32 i, iv, count;
+	u32 i, count;
 
 	char *fullURL = currentLine;
+	if (!fullURL) return GF_BAD_PARAM;
 
 	if (attribs->is_master_playlist && attribs->is_media_segment) {
 		GF_LOG(GF_LOG_ERROR, GF_LOG_DASH, ("[M3U8] Media segment tag MUST NOT appear in a Master Playlist\n"));
 		return GF_BAD_PARAM;
 	}
 
-	if (gf_url_is_local(fullURL)) {
-		fullURL = gf_url_concatenate(baseURL, fullURL);
-		assert(fullURL);
-	}
-
 	GF_LOG(GF_LOG_DEBUG, GF_LOG_DASH, ("[M3U8] declaring %s %s\n", attribs->is_master_playlist ? "sub-playlist" : "media segment", fullURL));
-
-	memset(attribs->key_iv, 0, sizeof(bin128) );
-	iv = gf_htonl(attribs->current_media_seq);
-	memcpy(attribs->key_iv + 12, (const void *) &iv, sizeof(iv));
 
 	{
 		PlaylistElement *curr_playlist = sub_playlist;
@@ -784,7 +910,7 @@ GF_Err declare_sub_playlist(char *currentLine, const char *baseURL, s_accumulate
 		if (stream == NULL) {
 			stream = stream_new(attribs->stream_id);
 			if (stream == NULL) {
-				/* OUT of memory */
+				/* out of memory */
 				gf_m3u8_master_playlist_del(playlist);
 				return GF_OUT_OF_MEM;
 			}
@@ -795,14 +921,14 @@ GF_Err declare_sub_playlist(char *currentLine, const char *baseURL, s_accumulate
 		}
 
 		/* OK, we have a stream, we have to choose the elements within the same stream variant */
-		assert(stream);
-		assert(stream->variants);
+		gf_assert(stream);
+		gf_assert(stream->variants);
 		count = gf_list_count(stream->variants);
 
 		if (!curr_playlist) {
 			for (i=0; i<(s32)count; i++) {
 				PlaylistElement *i_playlist_element = gf_list_get(stream->variants, i);
-				assert(i_playlist_element);
+				gf_assert(i_playlist_element);
 				if (stream->stream_id < MEDIA_TYPE_AUDIO) {
 					/* regular stream (EXT-X-STREAM-INF) */
 					// Two stream are identical only if they have the same URL
@@ -821,16 +947,40 @@ GF_Err declare_sub_playlist(char *currentLine, const char *baseURL, s_accumulate
 		if (attribs->is_master_playlist) {
 			if (curr_playlist != NULL) {
 				//playlist has already been defined - this happens when the same video playlist is defined several times with different audio codecs ...
-				gf_free(fullURL);
+				if (!attribs->codecs || !curr_playlist->audio_group || !attribs->group_audio || strstr(curr_playlist->audio_group, attribs->group_audio))
+					return GF_OK;
+				//gather codecs and bandwidth so that we can recompute them when generating the MPD
+				if (!curr_playlist->alt_bandwidths) {
+					curr_playlist->nb_alt_bandwidths = 1;
+					curr_playlist->alt_bandwidths = gf_malloc(sizeof(u32));
+					curr_playlist->alt_bandwidths[0] = curr_playlist->bandwidth;
+				}
+				char *codec = attribs->codecs;
+				while (codec) {
+					char *sep = strchr(codec, ',');
+					if (sep) sep[0] = 0;
+					if (!curr_playlist->codecs)
+						gf_dynstrcat(&curr_playlist->codecs, codec, NULL);
+					else if (!strstr(curr_playlist->codecs, codec))
+						gf_dynstrcat(&curr_playlist->codecs, codec, ",");
+					else if (!curr_playlist->main_codecs || !strstr(curr_playlist->main_codecs, codec))
+						gf_dynstrcat(&curr_playlist->main_codecs, codec, ",");
+					if (!sep) break;
+					sep[0] = ',';
+					codec = sep+1;
+				}
+				gf_dynstrcat(&curr_playlist->audio_group, attribs->group_audio, ",");
+				curr_playlist->alt_bandwidths = gf_realloc(curr_playlist->alt_bandwidths, sizeof(u32)*(curr_playlist->nb_alt_bandwidths+1) );
+				curr_playlist->alt_bandwidths[curr_playlist->nb_alt_bandwidths] = attribs->bandwidth;
+				curr_playlist->nb_alt_bandwidths++;
 				return GF_OK;
 			}
 			curr_playlist = playlist_element_new(TYPE_PLAYLIST, fullURL, attribs);
 			if (curr_playlist == NULL) {
-				/* OUT of memory */
+				/* out of memory */
 				gf_m3u8_master_playlist_del(playlist);
 				return GF_OUT_OF_MEM;
 			}
-			assert(fullURL);
 			if (curr_playlist->url)
 				gf_free(curr_playlist->url);
 			curr_playlist->url = gf_strdup(fullURL);
@@ -846,27 +996,34 @@ GF_Err declare_sub_playlist(char *currentLine, const char *baseURL, s_accumulate
 			if (curr_playlist->video_group) {
 				GF_LOG(GF_LOG_WARNING, GF_LOG_DASH, ("[M3U8] Warning: found an VIDEO group in the master playlist."));
 			}
+			curr_playlist->audio_group = attribs->group_audio ? gf_strdup(attribs->group_audio) : NULL;
 			gf_list_add(stream->variants, curr_playlist);
 			curr_playlist->width = attribs->width;
 			curr_playlist->height = attribs->height;
+			curr_playlist->channels = attribs->channels;
 		} else {
 			/* Normal Playlist */
-			assert((*playlist)->streams);
+			gf_assert((*playlist)->streams);
 			if (curr_playlist == NULL) {
+
 				/* This is a "normal" playlist without any element in it */
 				PlaylistElement *subElement;
-				assert(baseURL);
+				gf_assert(baseURL);
 				curr_playlist = playlist_element_new(TYPE_PLAYLIST, baseURL, attribs);
 				if (curr_playlist == NULL) {
-					/* OUT of memory */
+					/* out of memory */
 					gf_m3u8_master_playlist_del(playlist);
 					return GF_OUT_OF_MEM;
 				}
-				assert(curr_playlist->element.playlist.elements);
-				assert(fullURL);
-				assert(curr_playlist->url && !curr_playlist->codecs);
+				gf_assert(curr_playlist->element.playlist.elements);
+				gf_assert(curr_playlist->url && !curr_playlist->codecs);
 				curr_playlist->codecs = NULL;
+
 				subElement = playlist_element_new(TYPE_UNKNOWN, fullURL, attribs);
+				if (attribs->init_url) {
+					gf_free(attribs->init_url);
+					attribs->init_url = NULL;
+				}
 				if (subElement == NULL) {
 					gf_m3u8_master_playlist_del(playlist);
 					playlist_element_del(curr_playlist);
@@ -875,9 +1032,9 @@ GF_Err declare_sub_playlist(char *currentLine, const char *baseURL, s_accumulate
 				gf_list_add(curr_playlist->element.playlist.elements, subElement);
 				gf_list_add(stream->variants, curr_playlist);
 				curr_playlist->element.playlist.computed_duration += subElement->duration_info;
-				assert(stream);
-				assert(stream->variants);
-				assert(curr_playlist);
+				gf_assert(stream);
+				gf_assert(stream->variants);
+				gf_assert(curr_playlist);
 			} else {
 				PlaylistElement *subElement = playlist_element_new(TYPE_UNKNOWN, fullURL, attribs);
 				if (curr_playlist->element_type != TYPE_PLAYLIST) {
@@ -911,6 +1068,7 @@ GF_Err declare_sub_playlist(char *currentLine, const char *baseURL, s_accumulate
 		}
 		curr_playlist->element.playlist.media_seq_min = attribs->min_media_sequence;
 		curr_playlist->element.playlist.media_seq_max = attribs->current_media_seq;
+		curr_playlist->element.playlist.discontinuity = attribs->discontinuity;
 		if (attribs->bandwidth > 1)
 			curr_playlist->bandwidth = attribs->bandwidth;
 		if (attribs->is_playlist_ended)
@@ -925,6 +1083,8 @@ GF_Err declare_sub_playlist(char *currentLine, const char *baseURL, s_accumulate
 	attribs->playlist_utc_timestamp = 0;
 	attribs->bandwidth = 0;
 	attribs->stream_id = 0;
+	attribs->is_default = 0;
+	attribs->is_autoselect = 0;
 	if (attribs->codecs != NULL) {
 		gf_free(attribs->codecs);
 		attribs->codecs = NULL;
@@ -933,46 +1093,99 @@ GF_Err declare_sub_playlist(char *currentLine, const char *baseURL, s_accumulate
 		gf_free(attribs->language);
 		attribs->language = NULL;
 	}
-	if (attribs->group.audio != NULL) {
-		gf_free(attribs->group.audio);
-		attribs->group.audio = NULL;
+	if (attribs->name != NULL) {
+		gf_free(attribs->name);
+		attribs->name = NULL;
 	}
-	if (attribs->group.video != NULL) {
-		gf_free(attribs->group.video);
-		attribs->group.video = NULL;
+	if (attribs->group_audio != NULL) {
+		gf_free(attribs->group_audio);
+		attribs->group_audio = NULL;
 	}
-	if (fullURL != currentLine) {
-		gf_free(fullURL);
+	if (attribs->group_video != NULL) {
+		gf_free(attribs->group_video);
+		attribs->group_video = NULL;
+	}
+	if (attribs->group_subtitle != NULL) {
+		gf_free(attribs->group_subtitle);
+		attribs->group_subtitle = NULL;
+	}
+	if (attribs->group_closed_captions != NULL) {
+		gf_free(attribs->group_closed_captions);
+		attribs->group_closed_captions = NULL;
 	}
 	return GF_OK;
 }
 
-GF_Err gf_m3u8_parse_sub_playlist(const char *file, MasterPlaylist **playlist, const char *baseURL, Stream *in_stream, PlaylistElement *sub_playlist)
+typedef struct
 {
-	int len, i, currentLineNumber;
+	char *name;
+	u64 start;
+	u32 size;
+	Double duration;
+} HLS_LLChunk;
+
+static void reset_attribs(s_accumulated_attributes *attribs, Bool is_cleanup)
+{
+	attribs->width = attribs->height = 0;
+#define RST_ATTR(_name) if (attribs->_name) { gf_free(attribs->_name); attribs->_name = NULL; }
+
+	RST_ATTR(codecs)
+	RST_ATTR(group_audio)
+	RST_ATTR(group_video)
+	RST_ATTR(group_subtitle)
+	RST_ATTR(group_closed_captions)
+	RST_ATTR(language)
+	RST_ATTR(title)
+	if (is_cleanup) {
+		RST_ATTR(key_url)
+		RST_ATTR(name)
+	}
+	RST_ATTR(init_url)
+	RST_ATTR(mediaURL)
+}
+
+
+GF_Err gf_m3u8_parse_sub_playlist(const char *m3u8_file, MasterPlaylist **playlist, const char *baseURL, Stream *in_stream, PlaylistElement *sub_playlist, Bool is_master)
+{
+	int i, currentLineNumber;
 	FILE *f = NULL;
-	char *m3u8_payload;
+	u8 *m3u8_payload;
 	u32 m3u8_size, m3u8pos;
-	char currentLine[M3U8_BUF_SIZE];
+	char line_buffer[M3U8_BUF_SIZE];
+	char *currentLine = line_buffer;
+	size_t line_capacity = sizeof(line_buffer);
 	char **attributes = NULL;
+	Bool release_blob = GF_FALSE;
 	s_accumulated_attributes attribs;
 
-	if (!strncmp(file, "gmem://", 7)) {
-		if (sscanf(file, "gmem://%d@%p", &m3u8_size, &m3u8_payload) != 2) {
-			GF_LOG(GF_LOG_ERROR, GF_LOG_DASH,("[M3U8] Cannot Open m3u8 source %s for reading\n", file));
-			return GF_SERVICE_ERROR;
+	if (!strncmp(m3u8_file, "gmem://", 7)) {
+		GF_Err e = gf_blob_get(m3u8_file, &m3u8_payload,  &m3u8_size, NULL);
+		if (e) {
+			GF_LOG(GF_LOG_ERROR, GF_LOG_DASH,("[M3U8] Cannot Open m3u8 source %s for reading\n", m3u8_file));
+			return e;
 		}
+		release_blob = GF_TRUE;
 	} else {
-		f = gf_fopen(file, "rt");
+		f = gf_fopen(m3u8_file, "rt");
 		if (!f) {
-			GF_LOG(GF_LOG_ERROR, GF_LOG_DASH,("[M3U8] Cannot open m3u8 file %s for reading\n", file));
+			GF_LOG(GF_LOG_ERROR, GF_LOG_DASH,("[M3U8] Cannot open m3u8 file %s for reading\n", m3u8_file));
 			return GF_URL_ERROR;
 		}
 	}
+
+	memset(&attribs, 0, sizeof(s_accumulated_attributes));
+
+#define _CLEANUP \
+	reset_attribs(&attribs, GF_TRUE);\
+	if (currentLine != line_buffer) gf_free(currentLine); \
+	if (f) gf_fclose(f); \
+	else if (release_blob) gf_blob_release(m3u8_file);
+
+
 	if (*playlist == NULL) {
 		*playlist = master_playlist_new();
 		if (!(*playlist)) {
-			if (f) gf_fclose(f);
+			_CLEANUP
 			return GF_OUT_OF_MEM;
 		}
 	}
@@ -981,24 +1194,35 @@ GF_Err gf_m3u8_parse_sub_playlist(const char *file, MasterPlaylist **playlist, c
 	m3u8pos = 0;
 	while (1) {
 		char *eof;
+		int len;
 		if (f) {
-			if (!fgets(currentLine, sizeof(currentLine), f))
+			if (!gf_fgets(currentLine, sizeof(line_buffer), f))
 				break;
 		} else {
-			u32 __idx = 0;
+			u32 line_start = m3u8pos;
+			size_t line_size;
 			if (m3u8pos >= m3u8_size)
 				break;
-			while (1) {
-				assert(__idx < M3U8_BUF_SIZE);
-
-				currentLine[__idx] = m3u8_payload[m3u8pos];
-				__idx++;
-				m3u8pos++;
-				if ((currentLine[__idx-1]=='\n') || (currentLine[__idx-1]=='\r') || (m3u8pos >= m3u8_size)) {
-					currentLine[__idx]=0;
-					break;
-				}
+			/* Keep a complete logical line, including its terminating newline. */
+			while (m3u8pos < m3u8_size) {
+				char c = m3u8_payload[m3u8pos++];
+				if ((c=='\n') || (c=='\r')) break;
 			}
+			line_size = m3u8pos - line_start;
+			if (line_size >= line_capacity) {
+				char *new_line = NULL;
+				/* Reserve the NUL without overflowing size_t on 32-bit builds. */
+				if (line_size != (size_t) -1)
+					new_line = gf_realloc(currentLine == line_buffer ? NULL : currentLine, line_size + 1);
+				if (!new_line) {
+					_CLEANUP
+					return GF_OUT_OF_MEM;
+				}
+				currentLine = new_line;
+				line_capacity = line_size + 1;
+			}
+			memcpy(currentLine, m3u8_payload + line_start, line_size);
+			currentLine[line_size] = 0;
 		}
 		currentLineNumber++;
 		eof = strchr(currentLine, '\r');
@@ -1013,16 +1237,70 @@ GF_Err gf_m3u8_parse_sub_playlist(const char *file, MasterPlaylist **playlist, c
 		if (currentLineNumber == 1) {
 			/* Playlist MUST start with #EXTM3U */
 			if (len < 7 || (strncmp("#EXTM3U", currentLine, 7) != 0)) {
-				gf_fclose(f);
-				gf_m3u8_master_playlist_del(playlist);
 				GF_LOG(GF_LOG_ERROR, GF_LOG_DASH, ("Failed to parse M3U8 File, it should start with #EXTM3U, but was : %s\n", currentLine));
+				_CLEANUP
 				return GF_STREAM_NOT_FOUND;
 			}
 			continue;
 		}
 		if (currentLine[0] == '#') {
+			/* chunk */
+			if (!strncmp("#EXT-X-PART:", currentLine, 12)) {
+				GF_Err e = GF_NON_COMPLIANT_BITSTREAM;
+				char *sep;
+				char *file = strstr(currentLine, "URI=\"");
+				char *dur = strstr(currentLine, "DURATION=");
+				char *br = strstr(currentLine, "BYTERANGE=");
+
+				if (strstr(currentLine, "INDEPENDENT=YES")) {
+					attribs.independent_part = GF_TRUE;
+				}
+				if (br) {
+					u64 start=0;
+					u32 size=0;
+					sep = strchr(br, ',');
+					if (sep) sep[0] = 0;
+					if (sscanf(br+10, "\"%u@"LLU"\"", &size, &start) != 2)
+						file = NULL;
+					attribs.byte_range_start = start;
+					attribs.byte_range_end = start + size - 1;
+				}
+				if (dur) {
+					sep = strchr(dur, ',');
+					if (sep) sep[0] = 0;
+					attribs.duration_in_seconds = atof(dur+9);
+				}
+
+				if (file && dur) {
+					file += 5; // file starts with `URI:"`, move to start of URL
+					//find end quote
+					sep = strchr(file, '"');
+					if (!sep) {
+						e = GF_NON_COMPLIANT_BITSTREAM;
+						_CLEANUP
+						return e;
+					}
+					sep[0] = 0;
+
+					attribs.low_latency = GF_TRUE;
+					attribs.is_media_segment = GF_TRUE;
+					e = declare_sub_playlist(file, baseURL, &attribs, sub_playlist, playlist, in_stream);
+
+					(*playlist)->low_latency = GF_TRUE;
+					sep[0] = '"';
+				}
+				attribs.is_media_segment = GF_FALSE;
+				attribs.low_latency = GF_FALSE;
+				attribs.independent_part = GF_FALSE;
+				attribs.byte_range_start = attribs.byte_range_end = 0;
+				attribs.duration_in_seconds = 0;
+				if (e != GF_OK) {
+					_CLEANUP
+					return e;
+				}
+			}
 			/* A comment or a directive */
-			if (strncmp("#EXT", currentLine, 4) == 0) {
+			else if (!strncmp("#EXT", currentLine, 4)) {
 				attributes = parse_attributes(currentLine, &attribs);
 				if (attributes == NULL) {
 					GF_LOG(GF_LOG_DEBUG, GF_LOG_DASH, ("[M3U8]Comment at line %d : %s\n", currentLineNumber, currentLine));
@@ -1042,36 +1320,54 @@ GF_Err gf_m3u8_parse_sub_playlist(const char *file, MasterPlaylist **playlist, c
 				if (attribs.is_playlist_ended) {
 					(*playlist)->playlist_needs_refresh = GF_FALSE;
 				}
-				if (attribs.independant_segments) {
+				if (attribs.independent_segments) {
 					(*playlist)->independent_segments = GF_TRUE;
+				}
+				if (attribs.low_latency) {
+					(*playlist)->low_latency = GF_TRUE;
+					attribs.low_latency = GF_FALSE;
+				}
+				if (attribs.version > (*playlist)->version) {
+					(*playlist)->version = attribs.version;
 				}
 				if (attribs.mediaURL) {
 					GF_Err e = declare_sub_playlist(attribs.mediaURL, baseURL, &attribs, sub_playlist, playlist, in_stream);
 					gf_free(attribs.mediaURL);
 					attribs.mediaURL = NULL;
 					if (e != GF_OK) {
-						if (f) gf_fclose(f);
+						_CLEANUP
 						return e;
 					}
 				}
 			}
 		} else {
+
 			/*file encountered: sub-playlist or segment*/
-			GF_Err e = declare_sub_playlist(currentLine, baseURL, &attribs, sub_playlist, playlist, in_stream);
+			GF_Err e;
+			const char *pl_url = baseURL;
+			//this is the first (master) playlist but what is parsed is not a master playlist
+			//we will create a master + child with xlink, but the xlink must be only the file name
+			//otherwise dir/pl_video.m3u8 will be translated in master(dir/pl_video.m3u8) [ child(xlink=dir/pl_video.m3u8) ]
+			//thus xlink resolution would give dir/dir/pl_video.m3u8
+			if (is_master && !attribs.is_master_playlist)
+				pl_url = gf_file_basename(baseURL);
+			e = declare_sub_playlist(currentLine, pl_url, &attribs, sub_playlist, playlist, in_stream);
 			attribs.current_media_seq += 1;
 			if (e != GF_OK) {
-				if (f) gf_fclose(f);
+				_CLEANUP
 				return e;
 			}
 
 			//do not reset all attributes but at least set width/height/codecs to NULL, otherwise we may miss detection
 			//of audio-only playlists in av sequences
-			//reset_attributes(&attribs);
-			attribs.width = attribs.height = 0;
-			attribs.codecs = NULL;
+
+			reset_attribs(&attribs, GF_FALSE);
 		}
 	}
-	if (f) gf_fclose(f);
+
+	_CLEANUP
+
+#undef _CLEANUP
 
 	for (i=0; i<(int)gf_list_count((*playlist)->streams); i++) {
 		u32 j;
@@ -1086,10 +1382,6 @@ GF_Err gf_m3u8_parse_sub_playlist(const char *file, MasterPlaylist **playlist, c
 		}
 
 	}
-	if (attribs.key_url)
-		gf_free(attribs.key_url);
-	if (attribs.init_url)
-		gf_free(attribs.init_url);
 
 	if (attribs.version < attribs.compatibility_version) {
 		GF_LOG(GF_LOG_DEBUG, GF_LOG_DASH, ("[M3U8] Version %d specified but tags from version %d detected\n", attribs.version, attribs.compatibility_version));

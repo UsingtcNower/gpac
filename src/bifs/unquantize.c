@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2026
  *					All rights reserved
  *
  *  This file is part of GPAC / BIFS codec sub-project
@@ -32,7 +32,7 @@
 u32 gf_bifs_dec_qp14_get_bits(GF_BifsDecoder *codec)
 {
 	if (!codec->ActiveQP || !codec->coord_stored) return 0;
-	return (u32) ceil(log(codec->NumCoord+1) / log(2) );
+	return (u32) ceil(log1p(codec->NumCoord) / log(2) );
 }
 
 void gf_bifs_dec_qp14_enter(GF_BifsDecoder * codec, Bool Enter)
@@ -60,7 +60,7 @@ void gf_bifs_dec_qp14_set_length(GF_BifsDecoder * codec, u32 NbElements)
 
 GF_Err gf_bifs_dec_qp_set(GF_BifsDecoder *codec, GF_Node *qp)
 {
-	assert(gf_node_get_tag(qp) == TAG_MPEG4_QuantizationParameter);
+	if (gf_node_get_tag(qp) != TAG_MPEG4_QuantizationParameter) return GF_NON_COMPLIANT_BITSTREAM;
 
 	/*if we have an active QP, push it into the stack*/
 	if (codec->ActiveQP && ((GF_Node*)codec->ActiveQP != codec->scenegraph->global_qp) )
@@ -226,6 +226,7 @@ Bool Q_IsTypeOn(M_QuantizationParameter *qp, u32 q_type, u32 *NbBits, SFVec3f *b
 Fixed Q_InverseQuantize(Fixed Min, Fixed Max, u32 NbBits, u32 value)
 {
 	if (!value) return Min;
+	if (NbBits>=sizeof(value)*8) return Max;
 	if (value == (u32) ((1 << NbBits) - 1) ) return Max;
 	return Min + gf_muldiv(Max - Min, INT2FIX(value), INT2FIX( (1 << NbBits) - 1) );
 }
@@ -284,7 +285,7 @@ GF_Err Q_DecCoordOnUnitSphere(GF_BifsDecoder *codec, GF_BitStream *bs, u32 NbBit
 	s32 value;
 	Fixed tang[4], delta;
 	s32 dir;
-
+	if (!NbBits || NbBits>32) return GF_NON_COMPLIANT_BITSTREAM;
 	if (NbComp != 2 && NbComp != 3) return GF_BAD_PARAM;
 
 	//only 2 or 3 comp in the quantized version
@@ -292,6 +293,7 @@ GF_Err Q_DecCoordOnUnitSphere(GF_BifsDecoder *codec, GF_BitStream *bs, u32 NbBit
 	if(NbComp == 2) dir -= 2 * gf_bs_read_int(bs, 1);
 
 	orient = gf_bs_read_int(bs, 2);
+	if ((orient==3) && (NbComp==2)) return GF_NON_COMPLIANT_BITSTREAM;
 
 	for(i=0; i<NbComp; i++) {
 		value = gf_bs_read_int(bs, NbBits) - (1 << (NbBits-1) );
@@ -341,7 +343,7 @@ GF_Err Q_DecRotation(GF_BifsDecoder *codec, GF_BitStream *bs, u32 NbBits, void *
 //parses a Normal vec
 GF_Err Q_DecNormal(GF_BifsDecoder *codec, GF_BitStream *bs, u32 NbBits, void *field_ptr)
 {
-	Fixed comp[3];
+	Fixed comp[4];
 	SFVec3f v;
 	GF_Err e;
 	e = Q_DecCoordOnUnitSphere(codec, bs, NbBits, 2, comp);
@@ -395,6 +397,9 @@ GF_Err gf_bifs_dec_unquant_field(GF_BifsDecoder *codec, GF_BitStream *bs, GF_Nod
 
 	/*check is the QP is on and retrieves the bounds*/
 	if (!Q_IsTypeOn(codec->ActiveQP, QType, &NbBits, &BMin, &BMax)) return GF_EOS;
+
+	if (NbBits / 8 > gf_bs_available(bs))
+		return GF_NON_COMPLIANT_BITSTREAM;
 
 	/*ok the field is Quantized, dequantize*/
 	switch (QType) {

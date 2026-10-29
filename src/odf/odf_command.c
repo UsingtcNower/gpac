@@ -72,6 +72,7 @@ GF_Err gf_odf_parse_command(GF_BitStream *bs, GF_ODCom **com, u32 *com_size)
 	return err;
 }
 
+#ifndef GPAC_MINIMAL_ODF
 
 GF_ODCom *gf_odf_new_base_command()
 {
@@ -118,6 +119,7 @@ GF_Err gf_odf_write_base_command(GF_BitStream *bs, GF_BaseODCom *bcRem)
 	gf_bs_write_data(bs, bcRem->data, bcRem->dataSize);
 	return GF_OK;
 }
+#endif
 
 GF_ODCom *gf_odf_new_od_remove()
 {
@@ -160,7 +162,6 @@ GF_Err gf_odf_size_od_remove(GF_ODRemove *odRem, u32 *outSize)
 	if (!odRem) return GF_BAD_PARAM;
 
 	size = 10 * odRem->NbODs;
-	*outSize = 0;
 	*outSize = size/8;
 	if (*outSize * 8 != size) *outSize += 1;
 	return GF_OK;
@@ -244,9 +245,10 @@ GF_Err gf_odf_read_od_update(GF_BitStream *bs, GF_ODUpdate *odUp, u32 gf_odf_siz
 	u32 tmpSize = 0, nbBytes = 0;
 	if (! odUp) return GF_BAD_PARAM;
 
-	while (nbBytes < gf_odf_size_command) {
+	while (nbBytes < gf_odf_size_command && gf_bs_available(bs)) {
 		e = gf_odf_parse_descriptor(bs, &tmp, &tmpSize);
 		if (e) return e;
+		if (!tmpSize) break;
 		e = AddToODUpdate(odUp, tmp);
 		if (e) return e;
 		nbBytes += tmpSize + gf_odf_size_field_size(tmpSize);
@@ -279,7 +281,7 @@ GF_Err gf_odf_write_od_update(GF_BitStream *bs, GF_ODUpdate *odUp)
 
 	e = gf_odf_size_od_update(odUp, &size);
 	if (e) return e;
-	gf_odf_write_base_descriptor(bs, odUp->tag, size);
+	e = gf_odf_write_base_descriptor(bs, odUp->tag, size);
 	if (e) return e;
 
 	i=0;
@@ -449,8 +451,13 @@ GF_Err gf_odf_read_esd_remove(GF_BitStream *bs, GF_ESDRemove *esdRem, u32 gf_odf
 		return GF_OK;
 	}
 	esdRem->NbESDs = (gf_odf_size_command - 2) / 2;
+	if (esdRem->NbESDs > gf_bs_available(bs) / sizeof(u16)) {
+		return GF_NON_COMPLIANT_BITSTREAM;
+	}
+
 	esdRem->ES_ID = (u16 *) gf_malloc(sizeof(u16) * esdRem->NbESDs);
 	if (! esdRem->ES_ID) return GF_OUT_OF_MEM;
+
 	for (i = 0; i < esdRem->NbESDs ; i++) {
 		esdRem->ES_ID[i] = gf_bs_read_int(bs, 16);
 	}
@@ -486,6 +493,7 @@ GF_Err gf_odf_write_esd_remove(GF_BitStream *bs, GF_ESDRemove *esdRem)
 	return GF_OK;
 }
 
+#ifndef GPAC_MINIMAL_ODF
 
 GF_ODCom *gf_odf_new_ipmp_remove()
 {
@@ -651,3 +659,4 @@ GF_Err gf_odf_write_ipmp_update(GF_BitStream *bs, GF_IPMPUpdate *ipmpUp)
 	gf_bs_align(bs);
 	return GF_OK;
 }
+#endif

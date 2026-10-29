@@ -120,10 +120,13 @@ struct _drawable
 /*construction destruction*/
 Drawable *drawable_new();
 void drawable_del(Drawable *dr);
-void drawable_del_ex(Drawable *dr, GF_Compositor *compositor);
+void drawable_del_ex(Drawable *dr, GF_Compositor *compositor, Bool no_free);
 
 /*cleans up the drawable attached to the node*/
 void drawable_node_del(GF_Node *node);
+
+/*init drawable structure when stack extends drawable (text, bitmap)*/
+void drawable_init_ex(Drawable *tmp);
 
 
 /*
@@ -150,12 +153,12 @@ void drawable_mark_modified(Drawable *st, GF_TraverseState *tr_state);
 void drawable_check_focus_highlight(GF_Node *node, GF_TraverseState *tr_state, GF_Rect *orig_bounds);
 
 /*reset the highlight state (bounds) if associated with the current node. This is automatically called
-whenever reseting a drawable but must be called when a grouping node is modified*/
+whenever resetting a drawable but must be called when a grouping node is modified*/
 void drawable_reset_group_highlight(GF_TraverseState *tr_state, GF_Node *n);
 
 /*move current bounds to previous bounds for given target visual manager - called BEFORE updating the visual manager
 returns 1 if nod was draw last frame on this visual manager, 0 otherwise*/
-Bool drawable_flush_bounds(Drawable *node, GF_VisualManager *on_visual, u32 draw_mode);
+Bool drawable_flush_bounds(Drawable *node, GF_VisualManager *on_visual, u32 mode2d);
 
 /*
 	return 1 if same bound is found in previous list (and remove it from the list)
@@ -212,9 +215,9 @@ enum
 	CTX_IS_BACKGROUND = 1<<5,
 	/*turn antialiasing off when drawing*/
 	CTX_NO_ANTIALIAS = 1<<6,
-	/*indicates path has been textured, in which case FILL is skiped*/
+	/*indicates path has been textured, in which case FILL is skipped*/
 	CTX_PATH_FILLED = 1<<7,
-	/*indicates path outline has been textured, in which case STRIKE is skiped*/
+	/*indicates path outline has been textured, in which case STRIKE is skipped*/
 	CTX_PATH_STROKE = 1<<8,
 	/*indicates SVG path outline geometry has been modified*/
 	CTX_SVG_OUTLINE_GEOMETRY_DIRTY = 1<<9,
@@ -260,6 +263,8 @@ struct _drawable_context
 	*/
 	GF_Node *appear;
 
+	GF_Node *cliper;
+
 #ifdef GF_SR_USE_DEPTH
 	//local gain and offset
 	Fixed depth_gain, depth_offset;
@@ -278,12 +283,14 @@ DrawableContext *drawable_init_context_mpeg4(Drawable *node, GF_TraverseState *t
 #endif
 
 /*inits context for SVG - may return NULL if the node doesn't have to be drawn*/
-DrawableContext *drawable_init_context_svg(Drawable *drawable, GF_TraverseState *tr_state);
+DrawableContext *drawable_init_context_svg(Drawable *drawable, GF_TraverseState *tr_state, SVG_ClipPath *clip_path);
 
 /*base draw function for 2D objects (texturing, fill and strike)
 	in 2D, the current context is passed in the traversing state
 */
 void drawable_draw(Drawable *drawable, GF_TraverseState *tr_state);
+
+void call_drawable_draw(DrawableContext *ctx, GF_TraverseState *tr_state, Bool set_cyclic);
 
 /*picking function for VRML-based scene graphs*/
 void vrml_drawable_pick(Drawable *drawable, GF_TraverseState *tr_state);

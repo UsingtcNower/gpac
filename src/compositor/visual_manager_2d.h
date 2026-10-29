@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -34,7 +34,7 @@ GF_Rect gf_rect_ft(GF_IRect *rc);
 Bool gf_irect_inside(GF_IRect *rc1, GF_IRect *rc2);
 
 /*@rc1 equales @rc2*/
-#define gf_rect_equal(rc1, rc2) ((rc1.width == rc2.width) && (rc1.height == rc2.height) && (rc1.x == rc2.x)  && (rc1.y == rc2.y))
+#define irect_rect_equal(rc1, rc2) ((rc1.width == rc2.width) && (rc1.height == rc2.height) && (rc1.x == rc2.x)  && (rc1.y == rc2.y))
 
 //#define TRACK_OPAQUE_REGIONS
 
@@ -63,7 +63,7 @@ typedef struct
 
 /*adds rect to list - expand if needed*/
 #define ra_add(ra, rc) {	\
-	assert((rc)->width); 	\
+	gf_assert((rc)->width); 	\
 	if ((ra)->count==(ra)->alloc) { \
 		(ra)->alloc += RA_DEFAULT_STEP; \
 		(ra)->list = (GF_RectArrayEntry*)gf_realloc((ra)->list, sizeof(GF_RectArrayEntry) * (ra)->alloc); \
@@ -76,10 +76,6 @@ void ra_union_rect(GF_RectArray *ra, GF_IRect *rc);
 /*refreshes the content of the array to have only non-overlapping rects*/
 void ra_refresh(GF_RectArray *ra);
 
-
-/*adds @rc2 to @rc1 - the new @rc1 contains the old @rc1 and @rc2*/
-void gf_irect_union(GF_IRect *rc1, GF_IRect *rc2);
-
 struct _drawable_store
 {
 	struct _drawable *drawable;
@@ -90,8 +86,6 @@ struct _drawable_store
  *	Visual 2D functions
  */
 Bool visual_2d_draw_frame(GF_VisualManager *visual, GF_Node *root, GF_TraverseState *tr_state, Bool is_root_visual);
-
-Bool visual_2d_node_cull(GF_TraverseState *tr_state, GF_Rect *bounds);
 
 void visual_2d_pick_node(GF_VisualManager *visual, GF_TraverseState *tr_state, GF_Event *ev, GF_ChildNodeItem *children);
 
@@ -113,17 +107,17 @@ void visual_2d_release_raster(GF_VisualManager *visual);
 void visual_2d_texture_path(GF_VisualManager *visual, GF_Path *path, DrawableContext *ctx, GF_TraverseState *tr_state);
 /*draw the path (fill and strike) - if brushes are NULL they are created if needed based on the context aspect
 DrawPath shall always be called after TexturePath*/
-void visual_2d_draw_path(GF_VisualManager *visual, GF_Path *path, DrawableContext *ctx, GF_STENCIL brush, GF_STENCIL pen, GF_TraverseState *tr_state);
+void visual_2d_draw_path(GF_VisualManager *visual, GF_Path *path, DrawableContext *ctx, GF_EVGStencil * brush, GF_EVGStencil * pen, GF_TraverseState *tr_state);
 /*special texturing extension for text, using a given path (text rectangle) and texture*/
 void visual_2d_texture_path_text(GF_VisualManager *visual, DrawableContext *txt_ctx, GF_Path *path, GF_Rect *object_bounds, GF_TextureHandler *txh, GF_TraverseState *tr_state);
-/*fill given rect with given color with given ctx transform and clipper (used for text hilighting only)
+/*fill given rect with given color with given ctx transform and clipper (used for text highlighting only)
 if rc is NULL, fills object bounds*/
 void visual_2d_fill_rect(GF_VisualManager *visual, DrawableContext *ctx, GF_Rect *rc, u32 color, u32 strike_color, GF_TraverseState *tr_state);
 
 
 /*extended version of above function to override texture transforms - needed for proper texturing of glyphs*/
 void visual_2d_texture_path_extended(GF_VisualManager *visual, GF_Path *path, GF_TextureHandler *txh, struct _drawable_context *ctx, GF_Rect *orig_bounds, GF_Matrix2D *ext_mx, GF_TraverseState *tr_state);
-void visual_2d_draw_path_extended(GF_VisualManager *visual, GF_Path *path, DrawableContext *ctx, GF_STENCIL brush, GF_STENCIL pen, GF_TraverseState *tr_state, GF_Rect *orig_bounds, GF_Matrix2D *ext_mx, Bool is_erase);
+void visual_2d_draw_path_extended(GF_VisualManager *visual, GF_Path *path, DrawableContext *ctx, GF_EVGStencil * brush, GF_EVGStencil * pen, GF_TraverseState *tr_state, GF_Rect *orig_bounds, GF_Matrix2D *ext_mx, Bool is_erase);
 
 
 /*video overlay context*/

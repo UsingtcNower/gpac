@@ -1,6 +1,5 @@
-gpac (0.7.2-DEV) stable; urgency=low
+gpac (26.08-DEV) stable; urgency=low
 
-  * Initial release (Closes: #nnnn)  <nnnn is the bug number of your ITP>
+  * Initial release - see https://github.com/gpac/gpac/releases for more details
 
- -- Jean Le Feuvre <jeanlf@users.sourceforge.net>  Thu, 14 Aug 2008 10:14:13 +0200
-
+ -- Jean Le Feuvre <jeanlf@gpac.io>  Tue, 22 Feb 2022 15:00:00 +0200

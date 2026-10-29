@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -28,6 +28,7 @@
 #include <gpac/nodes_mpeg4.h>
 #include <gpac/nodes_x3d.h>
 
+#if !defined(GPAC_DISABLE_COMPOSITOR)
 
 
 void compositor_init_afx_node(GF_Compositor *compositor, GF_Node *node, MFURL *url)
@@ -42,7 +43,6 @@ void compositor_init_afx_node(GF_Compositor *compositor, GF_Node *node, MFURL *u
 	}
 #endif
 }
-
 
 void gf_sc_on_node_init(GF_Compositor *compositor, GF_Node *node)
 {
@@ -471,6 +471,14 @@ void gf_sc_on_node_init(GF_Compositor *compositor, GF_Node *node)
 	case TAG_SVG_g:
 		compositor_init_svg_g(compositor, node);
 		break;
+
+	//defs not traversed
+#if 0
+	case TAG_SVG_defs:
+		compositor_init_svg_defs(compositor, node);
+		break;
+#endif
+
 	case TAG_SVG_switch:
 		compositor_init_svg_switch(compositor, node);
 		break;
@@ -497,6 +505,9 @@ void gf_sc_on_node_init(GF_Compositor *compositor, GF_Node *node)
 		break;
 	case TAG_SVG_a:
 		compositor_init_svg_a(compositor, node);
+		break;
+	case TAG_SVG_clip_path:
+		compositor_init_svg_clip_path(compositor, node);
 		break;
 
 	case TAG_SVG_linearGradient:
@@ -558,7 +569,9 @@ void gf_sc_on_node_init(GF_Compositor *compositor, GF_Node *node)
 		break;
 
 	case TAG_SVG_filter:
+#ifdef GPAC_ENABLE_SVG_FILTERS
 		compositor_init_svg_filter(compositor, node);
+#endif
 		break;
 
 	case TAG_LSR_updates:
@@ -652,3 +665,6 @@ void gf_sc_invalidate(GF_Compositor *compositor, GF_Node *byObj)
 		break;
 	}
 }
+
+
+#endif //!defined(GPAC_DISABLE_COMPOSITOR)

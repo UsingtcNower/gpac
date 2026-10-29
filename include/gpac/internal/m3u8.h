@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *					Authors: Pierre Souchay - Jean Le Feuvre - Romain Bouqueau
- *			Copyright (c) Telecom ParisTech 2010-2012, Romain Bouqueau
+ *			Copyright (c) Telecom ParisTech 2010-2025
  *					All rights reserved
  *
  *  This file is part of GPAC
@@ -45,6 +45,7 @@ struct s_playList {
 	int current_media_seq;
 	int media_seq_min;
 	int media_seq_max;
+	int discontinuity;
 	double target_duration;
 	double computed_duration;
 	Bool is_ended;
@@ -54,7 +55,7 @@ typedef struct s_playList Playlist;
 
 typedef enum e_playlistElementType  { TYPE_PLAYLIST, TYPE_MEDIA, TYPE_UNKNOWN } PlaylistElementType;
 
-typedef enum e_playlistElementDRMMethod { DRM_NONE, DRM_AES_128 } PlaylistElementDRMMethod;
+typedef enum e_playlistElementDRMMethod { DRM_NONE, DRM_AES_128, DRM_CENC_CBCS, DRM_CENC_CTR } PlaylistElementDRMMethod;
 
 typedef enum _e_MediaType {
 	MEDIA_TYPE_UNKNOWN         = 0,
@@ -71,17 +72,23 @@ struct s_playlistElement {
 	MediaType media_type;
 	double duration_info;
 	u64 byte_range_start, byte_range_end;
-	int bandwidth, width, height;
+	int bandwidth, width, height, low_lat_chunk, independent_chunk;
 	char *title;
 	char *codecs;
 	char *language;
+	char *name;
 	char *audio_group;
 	char *video_group;
 	char *url;
 	char *init_segment_url;
+	char *main_codecs;
 	u64 init_byte_range_start, init_byte_range_end;
+	//informative UTC start time
 	u64 utc_start_time;
-
+	u32 discontinuity;
+	u32 channels;
+	u32 *alt_bandwidths;
+	u32 nb_alt_bandwidths;
 	PlaylistElementDRMMethod drm_method;
 	char *key_uri;
 	bin128 key_iv;
@@ -106,32 +113,34 @@ typedef struct s_stream Stream;
  */
 struct s_masterPlaylist {
 	GF_List *streams; /*Stream*/
+	u32 version;
 	int current_stream;
 	Bool playlist_needs_refresh;
-	Bool independent_segments;
+	Bool independent_segments, low_latency;
 };
 typedef struct s_masterPlaylist MasterPlaylist;
 
 
 /**
  * Parse the given m3u8 playlist file
- * \param file The file from cache to parse
- * \param playlist The playlist to fill. If argument is null, and file is valid, playlist will be allocated
- * \param baseURL The base URL of the playlist
- * \return GF_OK if playlist valid
+\param file The file from cache to parse
+\param playlist The playlist to fill. If argument is null, and file is valid, playlist will be allocated
+\param baseURL The base URL of the playlist
+\return GF_OK if playlist valid
  */
 GF_Err gf_m3u8_parse_master_playlist(const char *file, MasterPlaylist **playlist, const char *baseURL);
 
 /**
  * Parse the given playlist file as a subplaylist of an existing playlist
- * \param file The file from cache to parse
- * \param playlist The playlist to fill.
- * \param baseURL base URL of the playlist
- * \param in_program in which the playlist is parsed
- * \param sub_playlist existing subplaylist element in the playlist in which the playlist is parsed
- * \return GF_OK if playlist valid
+\param file The file from cache to parse
+\param playlist The playlist to fill.
+\param baseURL base URL of the playlist
+\param in_program in which the playlist is parsed
+\param sub_playlist existing subplaylist element in the playlist in which the playlist is parsed
+\param is_master set to true to indicate if this is the root playlist
+\return GF_OK if playlist valid
  */
-GF_Err gf_m3u8_parse_sub_playlist(const char *file, MasterPlaylist **playlist, const char *baseURL, Stream *in_program, PlaylistElement *sub_playlist);
+GF_Err gf_m3u8_parse_sub_playlist(const char *file, MasterPlaylist **playlist, const char *baseURL, Stream *in_program, PlaylistElement *sub_playlist, Bool is_master);
 
 /**
  * Deletes the given MasterPlaylist and all of its sub elements

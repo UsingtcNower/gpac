@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -25,9 +25,8 @@
 
 #include "nodes_stacks.h"
 #include "visual_manager.h"
-#include <gpac/options.h>
-#include <gpac/terminal.h>
 
+#if !defined(GPAC_DISABLE_COMPOSITOR)
 
 #ifndef GPAC_DISABLE_3D
 
@@ -274,6 +273,11 @@ Bool gf_sc_fit_world_to_screen(GF_Compositor *compositor)
 	camera_set_vectors(cam, pos, cam->vp_orientation, cam->fieldOfView);
 	cam->position = diff;
 	camera_move_to(cam, pos, cam->target, cam->up);
+	if (!compositor->player) {
+		camera_stop_anim(cam);
+		camera_set_vectors(cam, cam->end_pos, cam->end_ori, cam->end_fov);
+	}
+
 	cam->examine_center = tr_state.bbox.center;
 	cam->flags |= CF_STORE_VP;
 	if (cam->z_far < dist) cam->z_far = 10*dist;
@@ -356,8 +360,6 @@ static Bool compositor_handle_navigation_3d(GF_Compositor *compositor, GF_Event 
 
 	if (!cam) {
 		cam = &compositor->visual->camera;
-		assert(compositor);
-		assert(compositor->scene);
 	}
 	if (!cam || (cam->navigate_mode==GF_NAVIGATE_NONE)) return 0;
 
@@ -365,7 +367,7 @@ static Bool compositor_handle_navigation_3d(GF_Compositor *compositor, GF_Event 
 	if (!cam->navigate_mode && !(keys & GF_KEY_MOD_ALT) ) return 0;
 	x = y = 0;
 	/*renorm between -1, 1*/
-	if (ev->type<=GF_EVENT_MOUSEWHEEL) {
+	if (ev->type <= GF_EVENT_LAST_MOUSE) {
 		x = gf_divfix( INT2FIX(ev->mouse.x - (s32) compositor->visual->width/2), INT2FIX(compositor->visual->width));
 		y = gf_divfix( INT2FIX(ev->mouse.y - (s32) compositor->visual->height/2), INT2FIX(compositor->visual->height));
 	}
@@ -382,7 +384,7 @@ static Bool compositor_handle_navigation_3d(GF_Compositor *compositor, GF_Event 
 		key_trans = cam->world_bbox.radius / 100;
 	}
 
-	key_pan = FIX_ONE/25;
+	key_pan = FIX_ONE/20;
 	key_exam = FIX_ONE/20;
 	key_inv = 1;
 
@@ -394,7 +396,7 @@ static Bool compositor_handle_navigation_3d(GF_Compositor *compositor, GF_Event 
 		key_trans*=4;
 	}
 
-	if (!gf_term_get_option(compositor->term, GF_OPT_ORIENTATION_SENSORS_ACTIVE)) {
+	if (! compositor->orientation_sensors_active) {
 		Fixed yaw, pitch, roll;
 		gf_mx_get_yaw_pitch_roll(&compositor->visual->camera.modelview, &yaw, &pitch, &roll);
 		compositor->audio_renderer->yaw = yaw;
@@ -409,6 +411,7 @@ static Bool compositor_handle_navigation_3d(GF_Compositor *compositor, GF_Event 
 			compositor->grab_x = x;
 			compositor->grab_y = y;
 			compositor->navigation_state = 1;
+			compositor->auto_rotate=0;
 
 			/*change vp and examine center to current location*/
 			if ((keys & GF_KEY_MOD_CTRL) && compositor->hit_square_dist) {
@@ -432,7 +435,8 @@ static Bool compositor_handle_navigation_3d(GF_Compositor *compositor, GF_Event 
 		break;
 
 	case GF_EVENT_MOUSEMOVE:
-		if (gf_term_get_option(compositor->term, GF_OPT_ORIENTATION_SENSORS_ACTIVE)) return 0;
+		if (compositor->orientation_sensors_active) return 0;
+
 		if (!compositor->navigation_state) {
 			if (cam->navigate_mode==GF_NAVIGATE_GAME) {
 				/*init mode*/
@@ -449,7 +453,8 @@ static Bool compositor_handle_navigation_3d(GF_Compositor *compositor, GF_Event 
 		else if (x >= 0.49) compositor->auto_rotate = 2;
 		else if (y <= -0.49) compositor->auto_rotate = 3;
 		else if (y >= 0.49) compositor->auto_rotate = 4;
-		else compositor->auto_rotate = 0;
+		else
+			compositor->auto_rotate = 0;
 
 		handle_mouse_move_3d(compositor, cam, keys, dx, dy);
 
@@ -479,9 +484,38 @@ static Bool compositor_handle_navigation_3d(GF_Compositor *compositor, GF_Event 
 		}
 		return 1;
 
-	case GF_EVENT_MOUSEUP:
+	case GF_EVENT_MULTITOUCH:
 		compositor->auto_rotate=0;
-		if (ev->mouse.button==GF_MOUSE_LEFT) compositor->navigation_state = 0;
+		compositor->navigation_state = 0;
+		if (ev->mtouch.num_fingers==2) {
+			if( ABS(ev->mtouch.pinch) * 100 > 2 ) {
+				if (cam->is_3D) {
+					view_translate_z(compositor, cam, gf_mulfix(cam->width, compositor->visual->width* ev->mtouch.pinch));
+				} else {
+					nav_set_zoom_trans_2d(compositor->visual, zoom + gf_mulfix(trans_scale, ev->mtouch.pinch), 0, 0);
+				}
+				return 1;
+			}
+			if( ABS(ev->mtouch.rotation) > GF_PI/40 ) {
+				view_roll(compositor, cam, gf_mulfix(ev->mtouch.rotation, trans_scale));
+				return 1;
+			}
+		} else if (ev->mtouch.num_fingers==3) {
+			compositor->visual->camera.start_zoom = compositor->zoom;
+			compositor->zoom = FIX_ONE;
+			compositor->interoccular_offset = 0;
+			compositor->focdist = 0;
+			compositor->interoccular_offset = 0;
+			compositor->focdist = 0;
+			compositor_3d_reset_camera(compositor);
+			return 1;
+		}
+		return 0;
+
+	case GF_EVENT_MOUSEUP:
+		if (ev->mouse.button==GF_MOUSE_LEFT) {
+			compositor->navigation_state = 0;
+		}
 		break;
 
 	case GF_EVENT_KEYDOWN:
@@ -504,9 +538,9 @@ static Bool compositor_handle_navigation_3d(GF_Compositor *compositor, GF_Event 
 				compositor->visual->camera.start_zoom = compositor->zoom;
 				compositor->zoom = FIX_ONE;
 				compositor->interoccular_offset = 0;
-				compositor->focus_distance = 0;
+				compositor->focdist = 0;
 				compositor->interoccular_offset = 0;
-				compositor->focus_distance = 0;
+				compositor->focdist = 0;
 				compositor_3d_reset_camera(compositor);
 			}
 			break;
@@ -523,9 +557,9 @@ static Bool compositor_handle_navigation_3d(GF_Compositor *compositor, GF_Event 
 			if (keys & GF_KEY_MOD_ALT) {
 				if ( (keys & GF_KEY_MOD_SHIFT) && (compositor->visual->nb_views > 1) ) {
 					/*+ or - 10 cm*/
-					compositor->focus_distance += INT2FIX(key_inv);
+					compositor->focdist += INT2FIX(key_inv);
 					cam->flags |= CAM_IS_DIRTY;
-					fprintf(stderr, "AutoStereo view distance %f - focus %f\n", FIX2FLT(compositor->video_out->view_distance)/100, FIX2FLT(compositor->focus_distance)/100);
+					GF_LOG(GF_LOG_INFO, GF_LOG_COMPOSE, ("AutoStereo view distance %f - focus %f\n", FIX2FLT(compositor->video_out->dispdist)/100, FIX2FLT(compositor->focdist)/100));
 					gf_sc_invalidate(compositor, NULL);
 					return 1;
 				}
@@ -565,7 +599,7 @@ static Bool compositor_handle_navigation_3d(GF_Compositor *compositor, GF_Event 
 			if (keys & GF_KEY_MOD_ALT) {
 				if ( (keys & GF_KEY_MOD_SHIFT) && (compositor->visual->nb_views > 1) ) {
 					compositor->interoccular_offset += FLT2FIX(0.5) * key_inv;
-					fprintf(stderr, "AutoStereo interoccular distance %f\n", FIX2FLT(compositor->interoccular_distance + compositor->interoccular_offset));
+					GF_LOG(GF_LOG_INFO, GF_LOG_COMPOSE, ("AutoStereo interoccular distance %f\n", FIX2FLT(compositor->iod + compositor->interoccular_offset)));
 					cam->flags |= CAM_IS_DIRTY;
 					gf_sc_invalidate(compositor, NULL);
 					return 1;
@@ -618,14 +652,23 @@ static Bool compositor_handle_navigation_3d(GF_Compositor *compositor, GF_Event 
 			break;
 		case GF_KEY_D:
 			if (keys & GF_KEY_MOD_CTRL) {
-				compositor->tile_visibility_debug = !compositor->tile_visibility_debug;
+				if (compositor->tvtd==TILE_DEBUG_FULL) compositor->tvtd = 0;
+				else compositor->tvtd ++;
+				gf_sc_invalidate(compositor, NULL);
+				return 1;
+			}
+			break;
+		case GF_KEY_G:
+			if (keys & GF_KEY_MOD_CTRL) {
+				compositor->vrhud_mode++;
+				if (compositor->vrhud_mode==5) compositor->vrhud_mode=0;
 				gf_sc_invalidate(compositor, NULL);
 				return 1;
 			}
 			break;
 		case GF_KEY_A:
 			if (keys & GF_KEY_MOD_CTRL) {
-				compositor->force_all_tiles_visible = !compositor->force_all_tiles_visible;
+				compositor->tvtf = !compositor->tvtf;
 				gf_sc_invalidate(compositor, NULL);
 				return 1;
 			}
@@ -634,7 +677,7 @@ static Bool compositor_handle_navigation_3d(GF_Compositor *compositor, GF_Event 
 		break;
 	case GF_EVENT_SENSOR_ORIENTATION:
 	{
-		Fixed x, y, z, w, yaw, /*pitch, */roll;
+		Fixed z, w, yaw, /*pitch, */roll;
 		GF_Vec target;
 		GF_Matrix mx;
 
@@ -697,7 +740,7 @@ static Bool compositor_handle_navigation_2d(GF_VisualManager *visual, GF_Event *
 
 	x = y = 0;
 	/*renorm between -1, 1*/
-	if (ev->type<=GF_EVENT_MOUSEWHEEL) {
+	if (ev->type <= GF_EVENT_LAST_MOUSE) {
 		x = INT2FIX(ev->mouse.x);
 		y = INT2FIX(ev->mouse.y);
 	}
@@ -750,6 +793,26 @@ static Bool compositor_handle_navigation_2d(GF_VisualManager *visual, GF_Event *
 			return 0;
 		}
 		break;
+	case GF_EVENT_MULTITOUCH:
+		if (ev->mtouch.num_fingers==2) {
+			if( ABS(ev->mtouch.pinch) * 100 > 2 ) {
+				new_zoom = zoom + ev->mtouch.pinch * MIN(visual->width, visual->height)/100;
+				nav_set_zoom_trans_2d(visual, new_zoom, 0, 0);
+				return 1;
+			}
+			if( ABS(ev->mtouch.rotation) > GF_PI/40 ) {
+				visual->compositor->rotation -= ev->mtouch.rotation;
+				nav_set_zoom_trans_2d(visual, zoom, 0, 0);
+				return 1;
+			}
+		} else if (ev->mtouch.num_fingers==3) {
+			visual->compositor->trans_x = visual->compositor->trans_y = 0;
+			visual->compositor->rotation = 0;
+			visual->compositor->zoom = FIX_ONE;
+			nav_set_zoom_trans_2d(visual, FIX_ONE, 0, 0);
+			return 1;
+		}
+		return 0;
 
 	case GF_EVENT_MOUSEWHEEL:
 		switch (navigation_mode) {
@@ -828,7 +891,7 @@ static Bool compositor_handle_navigation_2d(GF_VisualManager *visual, GF_Event *
 		case GF_KEY_UP:
 			if (navigation_mode == GF_NAVIGATE_SLIDE) {
 				if (keys & GF_KEY_MOD_CTRL) {
-					Fixed new_zoom = zoom;
+					new_zoom = zoom;
 					if (new_zoom > FIX_ONE) new_zoom += key_inv*FIX_ONE/10;
 					else new_zoom += key_inv*FIX_ONE/20;
 					nav_set_zoom_trans_2d(visual, new_zoom, 0, 0);
@@ -870,13 +933,17 @@ void compositor_handle_auto_navigation(GF_Compositor *compositor)
 		break;
 	case 3:
 		dy = FIX_ONE/100;
+		if (cam->up.z>0.9999) compositor->auto_rotate=4;
 		break;
 	case 4:
 		dy = -FIX_ONE/100;
+		if (cam->up.z<-0.9999) compositor->auto_rotate=3;
 		break;
 	default:
 		return;
 	}
+	if (compositor->gazer_enabled)
+		compositor->gaze_changed = GF_FALSE;
 	handle_mouse_move_3d(compositor, cam, 0, dx, dy);
 #endif
 }
@@ -890,3 +957,5 @@ Bool compositor_handle_navigation(GF_Compositor *compositor, GF_Event *ev)
 #endif
 	return compositor_handle_navigation_2d(compositor->visual, ev);
 }
+
+#endif //!defined(GPAC_DISABLE_COMPOSITOR)

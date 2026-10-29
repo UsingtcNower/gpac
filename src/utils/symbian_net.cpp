@@ -196,10 +196,10 @@ static struct addrinfo *gf_sk_get_ipv6_addr(char *PeerName, u16 PortNumber, int 
 		service = (char *)portstring;
 	}
 	if (PeerName) {
-		strcpy(node, PeerName);
+		gf_strcpy(node, PeerName);
 		if (node[0]=='[') {
 			node[strlen(node)-1] = 0;
-			strcpy(node, &node[1]);
+			gf_strcpy(node, &node[1]);
 		}
 		dest = (char *) node;
 	}
@@ -225,7 +225,7 @@ GF_Err gf_sk_get_host_name(char *buffer)
 	return (ret == SOCKET_ERROR) ? GF_IP_ADDRESS_NOT_FOUND : GF_OK;
 }
 
-GF_Err gf_sk_get_local_ip(GF_Socket *sock, char *buffer)
+GF_Err gf_sk_get_local_ip(GF_Socket *sock, char buffer[GF_MAX_IP_NAME_LEN])
 {
 #ifdef GPAC_HAS_IPV6
 	char clienthost[NI_MAXHOST];
@@ -235,7 +235,7 @@ GF_Err gf_sk_get_local_ip(GF_Socket *sock, char *buffer)
 
 	if (getnameinfo((struct sockaddr *)&clientaddr, addrlen, clienthost, sizeof(clienthost), NULL, 0, NI_NUMERICHOST))
 		return GF_IP_NETWORK_FAILURE;
-	strcpy(buffer, clienthost);
+	gf_strlcpy(buffer, clienthost, GF_MAX_IP_NAME_LEN);
 #else
 	char *ip;
 	struct sockaddr_in name;
@@ -243,7 +243,7 @@ GF_Err gf_sk_get_local_ip(GF_Socket *sock, char *buffer)
 	if (getsockname(sock->socket, (struct sockaddr*) &name, &len)) return GF_IP_NETWORK_FAILURE;
 	ip = inet_ntoa(name.sin_addr);
 	if (!ip) return GF_IP_NETWORK_FAILURE;
-	strcpy(buffer, ip);
+	gf_strlcpy(buffer, ip, GF_MAX_IP_NAME_LEN);
 #endif
 	return GF_OK;
 }
@@ -400,7 +400,7 @@ GF_Err gf_sk_connect(GF_Socket *sock, char *PeerName, u16 PortNumber, char *loca
 	return GF_IP_CONNECTION_FAILURE;
 
 #else
-	struct hostent *Host;
+	struct hostent *Host=NULL;
 
 	if (!sock->socket)
 		sock->socket = socket(AF_INET, (sock->flags & GF_SOCK_IS_TCP) ? SOCK_STREAM : SOCK_DGRAM, 0);
@@ -411,7 +411,7 @@ GF_Err gf_sk_connect(GF_Socket *sock, char *PeerName, u16 PortNumber, char *loca
 	/*get the server IP*/
 	sock->dest_addr.sin_addr.s_addr = inet_addr(PeerName);
 	if (sock->dest_addr.sin_addr.s_addr==INADDR_NONE) {
-		Host = gethostbyname(PeerName);
+		Host = gf_gethostbyname(PeerName);
 		if (Host == NULL) {
 			switch (LASTSOCKERROR) {
 #ifndef __SYMBIAN32__
@@ -536,7 +536,7 @@ GF_Err gf_sk_bind(GF_Socket *sock, char *local_ip, u16 port, char *peer_name, u1
 	ret = gethostname(buf, GF_MAX_IP_NAME_LEN);
 	if (ret == SOCKET_ERROR) return GF_IP_ADDRESS_NOT_FOUND;
 	/*get the IP address*/
-	Host = gethostbyname(buf);
+	Host = gf_gethostbyname(buf);
 	if (Host == NULL) return GF_IP_ADDRESS_NOT_FOUND;
 	/*setup the address*/
 	memcpy((char *) &LocalAdd.sin_addr, Host->h_addr_list[0], sizeof(LocalAdd.sin_addr));
@@ -557,7 +557,7 @@ GF_Err gf_sk_bind(GF_Socket *sock, char *local_ip, u16 port, char *peer_name, u1
 		sock->dest_addr.sin_family = AF_INET;
 		sock->dest_addr.sin_addr.s_addr = inet_addr(peer_name);
 		if (sock->dest_addr.sin_addr.s_addr == INADDR_NONE) {
-			Host = gethostbyname(peer_name);
+			Host = gf_gethostbyname(peer_name);
 			if (Host == NULL) return GF_IP_ADDRESS_NOT_FOUND;
 			memcpy((char *) &sock->dest_addr.sin_addr, Host->h_addr_list[0], sizeof(u32));
 		}
@@ -1005,7 +1005,7 @@ GF_Err gf_sk_server_mode(GF_Socket *sock, Bool serverOn)
 	return GF_OK;
 }
 
-GF_Err gf_sk_get_remote_address(GF_Socket *sock, char *buf)
+GF_Err gf_sk_get_remote_address(GF_Socket *sock, char buf[GF_MAX_IP_NAME_LEN])
 {
 #ifdef GPAC_HAS_IPV6
 	char clienthost[NI_MAXHOST];
@@ -1013,10 +1013,10 @@ GF_Err gf_sk_get_remote_address(GF_Socket *sock, char *buf)
 	if (!sock || sock->socket) return GF_BAD_PARAM;
 	if (getnameinfo((struct sockaddr *)addrptr, sock->dest_addr_len, clienthost, sizeof(clienthost), NULL, 0, NI_NUMERICHOST))
 		return GF_IP_ADDRESS_NOT_FOUND;
-	strcpy(buf, clienthost);
+	gf_strlcpy(buf, clienthost, GF_MAX_IP_NAME_LEN);
 #else
 	if (!sock || !sock->socket) return GF_BAD_PARAM;
-	strcpy(buf, inet_ntoa(sock->dest_addr.sin_addr));
+	gf_strlcpy(buf, inet_ntoa(sock->dest_addr.sin_addr), GF_MAX_IP_NAME_LEN);
 #endif
 	return GF_OK;
 }
@@ -1033,7 +1033,7 @@ GF_Err gf_sk_send_to(GF_Socket *sock, char *buffer, u32 length, char *remoteHost
 	struct sockaddr_storage remote_add;
 #else
 	struct sockaddr_in remote_add;
-	struct hostent *Host;
+	struct hostent *Host=NULL;
 #endif
 #ifndef __SYMBIAN32__
 	u32 ready;
@@ -1091,7 +1091,7 @@ GF_Err gf_sk_send_to(GF_Socket *sock, char *buffer, u32 length, char *remoteHost
 		//setup the address
 		remote_add.sin_port = htons(remotePort);
 		//get the server IP
-		Host = gethostbyname(remoteHost);
+		Host = gf_gethostbyname(remoteHost);
 		if (Host == NULL) return GF_IP_ADDRESS_NOT_FOUND;
 		memcpy((char *) &remote_add.sin_addr, Host->h_addr_list[0], sizeof(u32));
 	} else {

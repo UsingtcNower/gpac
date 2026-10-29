@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre - Cyril Concolato
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2026
  *					All rights reserved
  *
  *  This file is part of GPAC / SVG Scene Graph sub-project
@@ -46,6 +46,33 @@ enum
 	GF_SVG_ATTOPT_FILTER = 5,
 } GF_SVGAttOption;
 
+/* unused XBL tags (deprecated)
+
+	TAG_XBL_ATT_RANGE_FIRST = TAG_SVG_ATT_RANGE_FIRST + 256,
+	TAG_XBL_ATT_id = TAG_XBL_ATT_RANGE_FIRST,
+	TAG_XBL_ATT_extends,
+	TAG_XBL_ATT_display,
+	TAG_XBL_ATT_inheritstyle,
+	TAG_XBL_ATT_includes,
+	TAG_XBL_ATT_name,
+	TAG_XBL_ATT_implements,
+	TAG_XBL_ATT_type,
+	TAG_XBL_ATT_readonly,
+	TAG_XBL_ATT_onget,
+	TAG_XBL_ATT_onset,
+	TAG_XBL_ATT_event,
+	TAG_XBL_ATT_action,
+	TAG_XBL_ATT_phase,
+	TAG_XBL_ATT_button,
+	TAG_XBL_ATT_modifiers,
+	TAG_XBL_ATT_keycode,
+	TAG_XBL_ATT_key,
+	TAG_XBL_ATT_charcode,
+	TAG_XBL_ATT_clickcount,
+	TAG_XBL_ATT_command,
+	TAG_XBL_ATT_preventdefault,
+	TAG_XBL_ATT_src,
+*/
 static const struct xml_att_def {
 	const char *name;
 	u32 tag;
@@ -95,7 +122,7 @@ static const struct xml_att_def {
 	{ "audio-level", TAG_SVG_ATT_audio_level, SVG_Number_datatype, 0, GF_XMLNS_SVG },
 	{ "viewport-fill", TAG_SVG_ATT_viewport_fill, SVG_Paint_datatype, 0, GF_XMLNS_SVG },
 	{ "viewport-fill-opacity", TAG_SVG_ATT_viewport_fill_opacity, SVG_Number_datatype, 0, GF_XMLNS_SVG },
-	{ "overflow", TAG_SVG_ATT_overflow, DOM_String_datatype, 0, GF_XMLNS_SVG },
+	{ "overflow", TAG_SVG_ATT_overflow, SVG_Overflow_datatype, 0, GF_XMLNS_SVG },
 	{ "fill-opacity", TAG_SVG_ATT_fill_opacity, SVG_Number_datatype, 0, GF_XMLNS_SVG },
 	{ "stroke-opacity", TAG_SVG_ATT_stroke_opacity, SVG_Number_datatype, 0, GF_XMLNS_SVG },
 	{ "fill-rule", TAG_SVG_ATT_fill_rule, SVG_FillRule_datatype, 0, GF_XMLNS_SVG },
@@ -230,8 +257,8 @@ static const struct xml_att_def {
 	{ "fx", TAG_SVG_ATT_fx, SVG_Coordinate_datatype, 0, GF_XMLNS_SVG },
 	{ "fy", TAG_SVG_ATT_fy, SVG_Coordinate_datatype, 0, GF_XMLNS_SVG },
 	{ "size", TAG_SVG_ATT_size, LASeR_Size_datatype, 0, GF_XMLNS_SVG },
-	{ "choice", TAG_SVG_ATT_choice, LASeR_Choice_datatype, 0, GF_XMLNS_SVG },
-	{ "delta", TAG_SVG_ATT_delta, LASeR_Size_datatype, 0, GF_XMLNS_SVG },
+	{ "choice", TAG_SVG_ATT_choice, LASeR_Choice_datatype, 0, GF_XMLNS_LASER },
+	{ "delta", TAG_SVG_ATT_delta, LASeR_Size_datatype, 0, GF_XMLNS_LASER },
 	{ "offset", TAG_SVG_ATT_offset, SVG_Number_datatype, 0, GF_XMLNS_SVG },
 	{ "syncBehaviorDefault", TAG_SVG_ATT_syncBehaviorDefault, SMIL_SyncBehavior_datatype, 0, GF_XMLNS_SVG },
 	{ "syncToleranceDefault", TAG_SVG_ATT_syncToleranceDefault, SMIL_SyncTolerance_datatype, 0, GF_XMLNS_SVG },
@@ -247,6 +274,9 @@ static const struct xml_att_def {
 	{ "overlay", TAG_SVG_ATT_overlay, SVG_Overlay_datatype, 0, GF_XMLNS_SVG },
 	{ "fullscreen", TAG_SVG_ATT_fullscreen, SVG_Boolean_datatype, 0, GF_XMLNS_SVG },
 	{ "motionTransform", TAG_SVG_ATT_motionTransform, SVG_Motion_datatype, 0, GF_XMLNS_SVG },
+	{ "clip-path", TAG_SVG_ATT_clip_path, SVG_ClipPath_datatype, 0, GF_XMLNS_SVG },
+
+
 	/*SMIL anim fill*/
 	{ "fill", TAG_SVG_ATT_smil_fill, SMIL_Fill_datatype, GF_SVG_ATTOPT_SMIL, GF_XMLNS_SVG },
 	/*regular paint fill*/
@@ -286,6 +316,7 @@ static const struct xml_att_def {
 	{ "y", TAG_SVG_ATT_cursorManager_y, SVG_Length_datatype, GF_SVG_ATTOPT_CURSOR, GF_XMLNS_LASER },
 
 	/*XBL*/
+#if 0
 	{ "id", TAG_XBL_ATT_id, DOM_String_datatype, 0, GF_XMLNS_XBL },
 	{ "extends", TAG_XBL_ATT_extends, DOM_String_datatype, 0, GF_XMLNS_XBL },
 	{ "display", TAG_XBL_ATT_display, DOM_String_datatype, 0, GF_XMLNS_XBL },
@@ -309,7 +340,7 @@ static const struct xml_att_def {
 	{ "command", TAG_XBL_ATT_command, DOM_String_datatype, 0, GF_XMLNS_XBL },
 	{ "preventdefault", TAG_XBL_ATT_preventdefault, DOM_String_datatype, 0, GF_XMLNS_XBL },
 	{ "src", TAG_XBL_ATT_src, DOM_String_datatype, 0, GF_XMLNS_XBL },
-
+#endif
 	/*GPAC SVG Extensions*/
 	{ "use-as-primary", TAG_GSVG_ATT_useAsPrimary, SVG_Boolean_datatype, 0, GF_XMLNS_SVG_GPAC_EXTENSION},
 	{ "depthOffset", TAG_GSVG_ATT_depthOffset, SVG_Number_datatype, 0, GF_XMLNS_SVG_GPAC_EXTENSION},
@@ -354,7 +385,7 @@ static u32 gf_xml_get_namespace(GF_DOMNode *elt, const char *attribute_name)
 	while (att) {
 		if (att->tag==TAG_DOM_ATT_any) {
 			GF_DOMFullAttribute *datt = (GF_DOMFullAttribute*)att;
-			if (datt->name && !strncmp(datt->name, "xmlns", 5) && !strcmp(datt->name+6, attribute_name)) {
+			if (datt->name && !strncmp(datt->name, "xmlns:", 6) && !strcmp(datt->name+6, attribute_name)) {
 				return gf_xml_get_namespace_id(*(DOM_String *)  datt->data);
 			}
 		}
@@ -381,14 +412,13 @@ static char *gf_xml_get_namespace_qname(GF_DOMNode *elt, u32 ns)
 	return gf_xml_get_namespace_qname((GF_DOMNode*)elt->sgprivate->parents->node, ns);
 }
 
-u32 gf_xml_get_attribute_tag(GF_Node *elt, char *attribute_name, u32 ns)
+u32 gf_xml_get_attribute_tag(GF_Node *elt, char *attribute_name, GF_NamespaceType ns)
 {
-	char *ns_sep;
 	u32 i, count;
 	count = sizeof(xml_attributes) / sizeof(struct xml_att_def);
 
 	if (!ns) {
-		ns_sep = strchr(attribute_name, ':');
+		char *ns_sep = strchr(attribute_name, ':');
 		if (ns_sep) {
 			ns_sep[0] = 0;
 			ns = gf_sg_get_namespace_code(elt->sgprivate->scenegraph, attribute_name);
@@ -413,9 +443,13 @@ u32 gf_xml_get_attribute_tag(GF_Node *elt, char *attribute_name, u32 ns)
 			case TAG_SVG_animateMotion:
 			case TAG_SVG_animateTransform:
 			case TAG_SVG_animation:
+			case TAG_SVG_set:
+				return xml_attributes[i].tag;
 			case TAG_SVG_audio:
 			case TAG_SVG_video:
-			case TAG_SVG_set:
+				//"type" on audio and video is mime type, not smil anim type
+				if (xml_attributes[i].tag == TAG_SVG_ATT_transform_type)
+					break;
 				return xml_attributes[i].tag;
 			default:
 				break;
@@ -468,6 +502,7 @@ u32 gf_xml_get_attribute_tag(GF_Node *elt, char *attribute_name, u32 ns)
 			return xml_attributes[i].tag;
 		}
 	}
+
 	return TAG_DOM_ATT_any;
 }
 
@@ -496,7 +531,7 @@ const char*gf_svg_get_attribute_name(GF_Node *node, u32 tag)
 
 			xmlns = (char *) gf_xml_get_namespace_qname((GF_DOMNode*)node, xml_attributes[i].xmlns);
 			if (xmlns) {
-				sprintf(node->sgprivate->scenegraph->szNameBuffer, "%s:%s", xmlns, xml_attributes[i].name);
+				snprintf(node->sgprivate->scenegraph->szNameBuffer, 99, "%s:%s", xmlns, xml_attributes[i].name);
 				return node->sgprivate->scenegraph->szNameBuffer;
 			}
 			return xml_attributes[i].name;
@@ -525,6 +560,7 @@ static const struct xml_elt_def {
 	{ "animateTransform", TAG_SVG_animateTransform, GF_XMLNS_SVG },
 	{ "animation", TAG_SVG_animation, GF_XMLNS_SVG },
 	{ "audio", TAG_SVG_audio, GF_XMLNS_SVG },
+	{ "clipPath", TAG_SVG_clip_path, GF_XMLNS_SVG },
 	{ "circle", TAG_SVG_circle, GF_XMLNS_SVG },
 	{ "defs", TAG_SVG_defs, GF_XMLNS_SVG },
 	{ "desc", TAG_SVG_desc, GF_XMLNS_SVG },
@@ -597,32 +633,13 @@ static const struct xml_elt_def {
 	{ "simpleLayout", TAG_LSR_simpleLayout, GF_XMLNS_LASER },
 	{ "updates", TAG_LSR_updates, GF_XMLNS_LASER },
 
-	/*XBL*/
-	{ "bindings", TAG_XBL_bindings, GF_XMLNS_XBL },
-	{ "binding", TAG_XBL_binding, GF_XMLNS_XBL },
-	{ "content", TAG_XBL_content, GF_XMLNS_XBL },
-	{ "children", TAG_XBL_children, GF_XMLNS_XBL },
-	{ "implementation", TAG_XBL_implementation, GF_XMLNS_XBL },
-	{ "constructor", TAG_XBL_constructor, GF_XMLNS_XBL },
-	{ "destructor", TAG_XBL_destructor, GF_XMLNS_XBL },
-	{ "field", TAG_XBL_field, GF_XMLNS_XBL },
-	{ "property", TAG_XBL_property, GF_XMLNS_XBL },
-	{ "getter", TAG_XBL_getter, GF_XMLNS_XBL },
-	{ "setter", TAG_XBL_setter, GF_XMLNS_XBL },
-	{ "method", TAG_XBL_method, GF_XMLNS_XBL },
-	{ "parameter", TAG_XBL_parameter, GF_XMLNS_XBL },
-	{ "body", TAG_XBL_body, GF_XMLNS_XBL },
-	{ "handlers", TAG_XBL_handlers, GF_XMLNS_XBL },
-	{ "handler", TAG_XBL_handler, GF_XMLNS_XBL },
-	{ "resources", TAG_XBL_resources, GF_XMLNS_XBL },
-	{ "stylesheet", TAG_XBL_stylesheet, GF_XMLNS_XBL },
-	{ "image", TAG_XBL_image, GF_XMLNS_XBL },
 };
 
+GF_EXPORT
 u32 gf_xml_get_element_tag(const char *element_name, u32 ns)
 {
 	u32 i, count;
-	if (!element_name) return TAG_UndefinedNode;
+//	if (!element_name) return TAG_UndefinedNode;
 	count = sizeof(xml_elements) / sizeof(struct xml_elt_def);
 	for (i=0; i<count; i++) {
 		if (!strcmp(xml_elements[i].name, element_name)) {
@@ -642,12 +659,12 @@ const char *gf_xml_get_element_name(GF_Node *n)
 	for (i=0; i<count; i++) {
 		if (n && n->sgprivate && (n->sgprivate->tag==xml_elements[i].tag)) {
 			char *xmlns;
-			if (!n || (ns == xml_elements[i].xmlns))
+			if (ns == xml_elements[i].xmlns)
 				return xml_elements[i].name;
 
 			xmlns = (char *) gf_sg_get_namespace_qname(n->sgprivate->scenegraph, xml_elements[i].xmlns);
 			if (xmlns) {
-				sprintf(n->sgprivate->scenegraph->szNameBuffer, "%s:%s", xmlns, xml_elements[i].name);
+				snprintf(n->sgprivate->scenegraph->szNameBuffer, 99, "%s:%s", xmlns, xml_elements[i].name);
 				return n->sgprivate->scenegraph->szNameBuffer;
 			}
 			return xml_elements[i].name;
@@ -674,8 +691,9 @@ GF_NamespaceType gf_xml_get_element_namespace(GF_Node *n)
 u32 gf_node_get_attribute_count(GF_Node *node)
 {
 	u32 count = 0;
-	GF_DOMNode *dom = (GF_DOMNode *)node;
-	GF_DOMAttribute *atts = dom->attributes;
+	GF_DOMAttribute *atts;
+	if (!node) return 0;
+	atts =  ((GF_DOMNode *)node)->attributes;
 	while (atts) {
 		count++;
 		atts = atts->next;
@@ -702,9 +720,9 @@ GF_Err gf_node_get_attribute_info(GF_Node *node, GF_FieldInfo *info)
 
 void gf_node_delete_attributes(GF_Node *node)
 {
-	GF_DOMAttribute *tmp;
 	GF_DOMAttribute *att = ((GF_DOMNode*)node)->attributes;
 	while(att) {
+		GF_DOMAttribute *tmp;
 		gf_svg_delete_attribute_value(att->data_type, att->data, node->sgprivate->scenegraph);
 		tmp = att;
 		att = att->next;
@@ -742,7 +760,7 @@ GF_Err gf_node_get_attribute_by_name(GF_Node *node, char *name, u32 xmlns_code, 
 
 		while (att) {
 			if (((u32) att->tag == TAG_DOM_ATT_any) &&
-			        ((!ns && !strcmp(name, att->name)) || (ns && !strncmp(att->name, ns, len) && !strcmp(att->name+len+1, name)))
+			        ((!ns && !strcmp(name, att->name)) || (ns && !strncmp(att->name, ns, len) && att->name[len] && !strcmp(att->name+len+1, name)))
 			   ) {
 				field->fieldIndex = att->tag;
 				field->fieldType = att->data_type;
@@ -956,6 +974,7 @@ void gf_node_register_iri(GF_SceneGraph *sg, XMLRI *target)
 #endif
 }
 
+GF_EXPORT
 void gf_node_unregister_iri(GF_SceneGraph *sg, XMLRI *target)
 {
 #ifndef GPAC_DISABLE_SVG
@@ -963,10 +982,12 @@ void gf_node_unregister_iri(GF_SceneGraph *sg, XMLRI *target)
 #endif
 }
 
-GF_Node *gf_xml_node_clone(GF_SceneGraph *inScene, GF_Node *orig, GF_Node *cloned_parent, char *inst_id, Bool deep)
+GF_Node *gf_sg_xml_node_clone(GF_SceneGraph *inScene, GF_Node *orig, GF_Node *cloned_parent, char *inst_id, Bool deep)
 {
 	GF_DOMAttribute *att;
-	GF_Node *clone = gf_node_new(inScene, orig->sgprivate->tag);
+	GF_Node *clone;
+	if (!orig) return NULL;
+	clone = gf_node_new(inScene, orig->sgprivate->tag);
 	if (!clone) return NULL;
 
 	if (orig->sgprivate->tag == TAG_DOMText) {
@@ -981,7 +1002,7 @@ GF_Node *gf_xml_node_clone(GF_SceneGraph *inScene, GF_Node *orig, GF_Node *clone
 			n_src = (GF_DOMFullNode *)orig;
 			n_dst = (GF_DOMFullNode *)clone;
 			n_dst->ns = n_src->ns;
-			n_dst->name = gf_strdup(n_dst->name);
+			n_dst->name = gf_strdup(n_src->name);
 		}
 
 		att = ((GF_DOMNode *)orig)->attributes;
@@ -1033,20 +1054,23 @@ static u32 check_existing_file(char *base_file, char *ext, char *data, u32 data_
 	char szFile[GF_MAX_PATH];
 	u64 fsize;
 	FILE *f;
+	int concatres;
 
-	sprintf(szFile, "%s%04X%s", base_file, idx, ext);
+	concatres = snprintf(szFile, GF_MAX_PATH, "%s%04X%s", base_file, idx, ext);
+	if (concatres<0) {
+		GF_LOG(GF_LOG_WARNING, GF_LOG_CORE, ("Path too long (limit %d) when trying to concatenate %s and %s\n", GF_MAX_PATH, base_file, ext));
+	}
 
 	f = gf_fopen(szFile, "rb");
 	if (!f) return 0;
 
-	gf_fseek(f, 0, SEEK_END);
-	fsize = gf_ftell(f);
+	fsize = gf_fsize(f);
 	if (fsize==data_size) {
 		u32 offset=0;
 		char cache[1024];
-		gf_fseek(f, 0, SEEK_SET);
+
 		while (fsize) {
-			u32 read = (u32) fread(cache, 1, 1024, f);
+			u32 read = (u32) gf_fread(cache, 1024, f);
 			if ((s32) read < 0) return 0;
 			fsize -= read;
 			if (memcmp(cache, data+offset, sizeof(char)*read)) break;
@@ -1066,32 +1090,34 @@ static u32 check_existing_file(char *base_file, char *ext, char *data, u32 data_
 GF_EXPORT
 GF_Err gf_node_store_embedded_data(XMLRI *iri, const char *cache_dir, const char *base_filename)
 {
-	char szFile[GF_MAX_PATH], buf[20], *sep, *data, *ext;
-	u32 data_size, idx;
+	char szFile[GF_MAX_PATH], buf[20], *sep, *data=NULL, *ext;
+	u32 data_size=0, idx;
 	Bool existing;
-	FILE *f;
 
-	if (!cache_dir || !base_filename || !iri || !iri->string || strncmp(iri->string, "data:", 5)) return GF_OK;
+	if (!cache_dir || !base_filename || !iri || !iri->string) return GF_OK;
+	if (strncmp(iri->string, "data:", 5)) return GF_OK;
+	//used in test suite
+	if (!strcmp(iri->string, "data:,void")) return GF_OK;
 
 	/*handle "data:" scheme when cache is specified*/
-	strcpy(szFile, cache_dir);
+	gf_strcpy(szFile, cache_dir);
 	data_size = (u32) strlen(szFile);
 	if (szFile[data_size-1] != GF_PATH_SEPARATOR) {
 		szFile[data_size] = GF_PATH_SEPARATOR;
 		szFile[data_size+1] = 0;
 	}
-	if (base_filename) {
-		sep = strrchr(base_filename, GF_PATH_SEPARATOR);
+
+	sep = strrchr(base_filename, GF_PATH_SEPARATOR);
 #ifdef WIN32
-		if (!sep) sep = strrchr(base_filename, '/');
+	if (!sep) sep = strrchr(base_filename, '/');
 #endif
-		if (!sep) sep = (char *) base_filename;
-		else sep += 1;
-		strcat(szFile, sep);
-	}
-	sep = strrchr(szFile, '.');
+	if (!sep) sep = (char *) base_filename;
+	else sep += 1;
+	gf_strcat(szFile, sep);
+
+	sep = gf_file_ext_start(szFile);
 	if (sep) sep[0] = 0;
-	strcat(szFile, "_img_");
+	gf_strcat(szFile, "_img_");
 
 	/*get mime type*/
 	sep = (char *)iri->string + 5;
@@ -1102,7 +1128,8 @@ GF_Err gf_node_store_embedded_data(XMLRI *iri, const char *cache_dir, const char
 
 
 	data = NULL;
-	sep = strchr(iri->string, ';');
+	sep = strstr(iri->string, ";base");
+	if (!sep) return GF_OK;
 	if (!strncmp(sep, ";base64,", 8)) {
 		sep += 8;
 		data_size = 2 * (u32) strlen(sep);
@@ -1117,7 +1144,11 @@ GF_Err gf_node_store_embedded_data(XMLRI *iri, const char *cache_dir, const char
 		sep += 8;
 		data_size = gf_base16_decode(sep, (u32) strlen(sep), data, data_size);
 	}
-	if (!data_size) return GF_OK;
+	if (!data) return GF_OK;
+	if (!data_size) {
+		gf_free(data);
+		return GF_OK;
+	}
 
 	iri->type = XMLRI_STRING;
 
@@ -1133,26 +1164,28 @@ GF_Err gf_node_store_embedded_data(XMLRI *iri, const char *cache_dir, const char
 		idx++;
 	}
 	sprintf(buf, "%04X", idx);
-	strcat(szFile, buf);
-	strcat(szFile, ext);
+	gf_strcat(szFile, buf);
+	gf_strcat(szFile, ext);
 
+	GF_Err e = GF_OK;
 	if (!existing) {
-		f = gf_fopen(szFile, "wb");
+		FILE *f = gf_fopen(szFile, "wb");
 		if (!f) {
 			gf_free(data);
 			gf_free(iri->string);
 			iri->string = NULL;
 			return GF_IO_ERR;
 		}
-		gf_fwrite(data, data_size, 1, f);
+		if (gf_fwrite(data, data_size, f)!=data_size) e = GF_IO_ERR;
 		gf_fclose(f);
 	}
 	gf_free(data);
 	gf_free(iri->string);
 	iri->string = gf_strdup(szFile);
-	return GF_OK;
+	if (!iri->string) e = GF_OUT_OF_MEM;
+
+	return e;
 }
 
 
 #endif /*GPAC_DISABLE_SVG*/
-

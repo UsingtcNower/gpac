@@ -1,4 +1,4 @@
-#include <gpac/unicode.h>
+#include <gpac/utf.h>
 /**
  * This code has been adapted from http://www.ietf.org/rfc/rfc2640.txt
  * Full Copyright Statement
@@ -38,16 +38,14 @@ Acknowledgement
 GF_EXPORT
 u32 utf8_to_ucs4(u32 * ucs4_buf, u32 utf8_len, unsigned char *utf8_buf)
 {
+	if (!ucs4_buf || !utf8_buf) return 0;
 	const unsigned char *utf8_endbuf = utf8_buf + utf8_len;
 	u32             ucs_len = 0;
-	assert( ucs4_buf );
-	assert( utf8_buf );
 
 	while (utf8_buf != utf8_endbuf) {
 
 		if ((*utf8_buf & 0x80) == 0x00) {
-			/* ASCII chars no
-								 * conversion needed */
+			/* ASCII chars no conversion needed */
 			*ucs4_buf++ = (u32) * utf8_buf;
 			utf8_buf++;
 			ucs_len++;
@@ -59,8 +57,7 @@ u32 utf8_to_ucs4(u32 * ucs4_buf, u32 utf8_len, unsigned char *utf8_buf)
 			utf8_buf += 2;
 			ucs_len++;
 		} else if ((*utf8_buf & 0xF0) == 0xE0) {
-			/* In the 3 byte utf-8
-									 * range */
+			/* In the 3 byte utf-8 range */
 			*ucs4_buf++ = (u32) (((*utf8_buf - 0xE0) * 0x1000)
 			                     + ((*(utf8_buf + 1) - 0x80) * 0x40)
 			                     + (*(utf8_buf + 2) - 0x80));
@@ -68,8 +65,7 @@ u32 utf8_to_ucs4(u32 * ucs4_buf, u32 utf8_len, unsigned char *utf8_buf)
 			utf8_buf += 3;
 			ucs_len++;
 		} else if ((*utf8_buf & 0xF8) == 0xF0) {
-			/* In the 4 byte utf-8
-									 * range */
+			/* In the 4 byte utf-8 range */
 			*ucs4_buf++ = (u32)
 			              (((*utf8_buf - 0xF0) * 0x040000)
 			               + ((*(utf8_buf + 1) - 0x80) * 0x1000)
@@ -78,8 +74,7 @@ u32 utf8_to_ucs4(u32 * ucs4_buf, u32 utf8_len, unsigned char *utf8_buf)
 			utf8_buf += 4;
 			ucs_len++;
 		} else if ((*utf8_buf & 0xFC) == 0xF8) {
-			/* In the 5 byte utf-8
-									 * range */
+			/* In the 5 byte utf-8 range */
 			*ucs4_buf++ = (u32)
 			              (((*utf8_buf - 0xF8) * 0x01000000)
 			               + ((*(utf8_buf + 1) - 0x80) * 0x040000)
@@ -89,8 +84,7 @@ u32 utf8_to_ucs4(u32 * ucs4_buf, u32 utf8_len, unsigned char *utf8_buf)
 			utf8_buf += 5;
 			ucs_len++;
 		} else if ((*utf8_buf & 0xFE) == 0xFC) {
-			/* In the 6 byte utf-8
-									 * range */
+			/* In the 6 byte utf-8  range */
 			*ucs4_buf++ = (u32)
 			              (((*utf8_buf - 0xFC) * 0x40000000)
 			               + ((*(utf8_buf + 1) - 0x80) * 0x010000000)
@@ -100,6 +94,8 @@ u32 utf8_to_ucs4(u32 * ucs4_buf, u32 utf8_len, unsigned char *utf8_buf)
 			               + (*(utf8_buf + 5) - 0x80));
 			utf8_buf += 6;
 			ucs_len++;
+		} else {
+			return 0;
 		}
 	}
 	return (ucs_len);

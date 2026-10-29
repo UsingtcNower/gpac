@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -27,7 +27,7 @@
 
 #include <gpac/nodes_mpeg4.h>
 
-#ifndef GPAC_DISABLE_VRML
+#if !defined(GPAC_DISABLE_VRML) && !defined(GPAC_DISABLE_COMPOSITOR)
 
 typedef struct
 {
@@ -49,7 +49,7 @@ static void animationstream_destroy(GF_Node *node, void *rs, Bool is_destroy)
 		}
 		if (st->stream && as->isActive) {
 			gf_mo_set_flag(st->stream, GF_MO_DISPLAY_REMOVE, 1);
-			gf_mo_stop(st->stream);
+			gf_mo_stop(&st->stream);
 		}
 		gf_sg_vrml_mf_reset(&st->current_url, GF_SG_VRML_MFURL);
 		gf_free(st);
@@ -79,7 +79,7 @@ static void animationstream_check_url(AnimationStreamStack *stack, M_AnimationSt
 		/*if changed while playing stop old source*/
 		if (as->isActive) {
 			gf_mo_set_flag(stack->stream, GF_MO_DISPLAY_REMOVE, 1);
-			gf_mo_stop(stack->stream);
+			gf_mo_stop(&stack->stream);
 		}
 		gf_mo_unregister((GF_Node *)as, stack->stream);
 
@@ -114,6 +114,13 @@ static void animationstream_activate(AnimationStreamStack *stack, M_AnimationStr
 
 static void animationstream_deactivate(AnimationStreamStack *stack, M_AnimationStream *as)
 {
+	Bool no_redraw = GF_FALSE;
+	//if dynamic root scene and this no more active streams, do not force a redraw
+	if (stack->stream && stack->stream->odm && stack->compositor->root_scene->is_dynamic_scene) {
+		if (!gf_list_count(stack->compositor->systems_pids))
+			no_redraw = GF_TRUE;
+	}
+	
 	if (as->isActive) {
 		as->isActive = 0;
 		gf_node_event_out((GF_Node*)as, 6/*"isActive"*/);
@@ -121,10 +128,11 @@ static void animationstream_deactivate(AnimationStreamStack *stack, M_AnimationS
 	if (stack->stream) {
 		if (gf_mo_url_changed(stack->stream, &as->url))
 			gf_mo_set_flag(stack->stream, GF_MO_DISPLAY_REMOVE, 1);
-		gf_mo_stop(stack->stream);
+		gf_mo_stop(&stack->stream);
 	}
 	stack->time_handle.needs_unregister = 1;
-	gf_sc_invalidate(stack->compositor, NULL);
+	if (!no_redraw)
+		gf_sc_invalidate(stack->compositor, NULL);
 }
 
 static void animationstream_update_time(GF_TimeNode *st)
@@ -202,4 +210,4 @@ void compositor_animationstream_modified(GF_Node *node)
 		st->time_handle.needs_unregister = 0;
 }
 
-#endif /*GPAC_DISABLE_VRML*/
+#endif // !defined(GPAC_DISABLE_VRML) && !defined(GPAC_DISABLE_COMPOSITOR)

@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -30,8 +30,7 @@
 #include "mpeg4_grouping.h"
 #include "visual_manager.h"
 
-#ifndef GPAC_DISABLE_VRML
-
+#if !defined(GPAC_DISABLE_VRML) && !defined(GPAC_DISABLE_COMPOSITOR)
 
 #ifdef GPAC_DISABLE_3D
 
@@ -50,6 +49,7 @@ void compositor_init_group(GF_Compositor *compositor, GF_Node *node)
 {
 	GroupingNode2D *ptr;
 	GF_SAFEALLOC(ptr, GroupingNode2D);
+	if (!ptr) return;
 	gf_node_set_private(node, ptr);
 	gf_node_set_callback_function(node, TraverseGroup);
 }
@@ -168,6 +168,7 @@ static void NewTransformStack(GF_Compositor *compositor, GF_Node *node, GF_Child
 {
 	TransformStack *st;
 	GF_SAFEALLOC(st, TransformStack);
+	if (!st) return;
 
 	gf_mx_init(st->mx);
 	gf_node_set_private(node, st);
@@ -401,7 +402,7 @@ void compositor_init_lod(GF_Compositor *compositor, GF_Node *node)
 	gf_node_set_private(node, stack);
 }
 
-#endif /*GPAC_DISABLE_3D*/
+#endif //(GPAC_DISABLE_3D)
 
 
-#endif /*GPAC_DISABLE_VRML*/
+#endif //!defined(GPAC_DISABLE_VRML) && !defined(GPAC_DISABLE_COMPOSITOR)

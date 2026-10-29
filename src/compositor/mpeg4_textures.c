@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2026
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -29,15 +29,12 @@
 #include <gpac/nodes_mpeg4.h>
 #include <gpac/nodes_x3d.h>
 
-#ifndef GPAC_DISABLE_VRML
-
-#ifdef __cplusplus
-extern "C" {
-#endif
+#if !defined(GPAC_DISABLE_VRML) && !defined(GPAC_DISABLE_COMPOSITOR)
 
 /*for cache texture decode and hash*/
 #include <gpac/avparse.h>
 #include <gpac/crypt.h>
+#include "nodes_stacks.h"
 
 
 typedef struct
@@ -85,7 +82,7 @@ static void movietexture_deactivate(MovieTextureStack *stack, M_MovieTexture *mt
 	stack->time_handle.needs_unregister = 1;
 
 	if (stack->txh.is_open) {
-		gf_sc_texture_stop(&stack->txh);
+		gf_sc_texture_stop_no_unregister(&stack->txh);
 	}
 }
 static void movietexture_update(GF_TextureHandler *txh)
@@ -105,7 +102,7 @@ static void movietexture_update(GF_TextureHandler *txh)
 			gf_sc_texture_restart(txh);
 		}
 		/*if active deactivate*/
-		else if (txnode->isActive && gf_mo_should_deactivate(st->txh.stream) ) {
+		else if (txnode->isActive && (txnode->startTime<txnode->stopTime) && gf_mo_should_deactivate(st->txh.stream) ) {
 			movietexture_deactivate(st, txnode);
 		}
 	}
@@ -170,6 +167,8 @@ static void movietexture_update_time(GF_TimeNode *st)
 
 	if (! mt->isActive) movietexture_activate(stack, mt, time);
 	stack->txh.stream_finished = GF_FALSE;
+	if (!mt->url.count)
+		stack->txh.stream_finished = GF_TRUE;
 }
 
 void compositor_init_movietexture(GF_Compositor *compositor, GF_Node *node)
@@ -235,22 +234,22 @@ static void imagetexture_destroy(GF_Node *node, void *rs, Bool is_destroy)
 		if (gf_node_get_tag(node)==TAG_MPEG4_CacheTexture) {
 			char section[64];
 			const char *opt, *file;
-			Bool delete_file = 1;
+			Bool delete_file = GF_TRUE;
 			M_CacheTexture *ct = (M_CacheTexture*)node;
 
 			sprintf(section, "@cache=%p", ct);
-			file = gf_cfg_get_key(txh->compositor->user->config, section, "cacheFile");
-			opt = gf_cfg_get_key(txh->compositor->user->config, section, "expireAfterNTP");
+			file = gf_opts_get_key(section, "cacheFile");
+			opt = gf_opts_get_key(section, "expireAfterNTP");
 
 			if (opt) {
 				u32 sec, frac, exp;
 				sscanf(opt, "%u", &exp);
 				gf_net_get_ntp(&sec, &frac);
-				if (!exp || (exp>sec)) delete_file=0;
+				if (!exp || (exp>sec)) delete_file=GF_FALSE;
 			}
 			if (delete_file) {
-				gf_delete_file((char*)file);
-				gf_cfg_del_section(txh->compositor->user->config, section);
+				if (file) gf_file_delete((char*)file);
+				gf_opts_del_section(section);
 			}
 
 			if (txh->data) gf_free(txh->data);
@@ -297,38 +296,32 @@ static void imagetexture_update(GF_TextureHandler *txh)
 			if (ct->image.buffer) {
 				char *par = (char *) gf_scene_get_service_url( gf_node_get_graph(txh->owner ) );
 				char *src_url = gf_url_concatenate(par, ct->image.buffer);
-				FILE *test = gf_fopen( src_url ? src_url : ct->image.buffer, "rb");
-				if (test) {
-					fseek(test, 0, SEEK_END);
-					ct->data_len = (u32) gf_ftell(test);
-					ct->data = gf_malloc(sizeof(char)*ct->data_len);
-					fseek(test, 0, SEEK_SET);
-					if (ct->data_len != fread(ct->data, 1, ct->data_len, test)) {
-						GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to load CacheTexture data from file %s: IO err\n", src_url ? src_url : ct->image.buffer ) );
-						gf_free(ct->data);
-						ct->data = NULL;
-						ct->data_len = 0;
-					}
-					gf_fclose(test);
-				} else {
-					GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to load CacheTexture data from file %s: not found\n", src_url ? src_url : ct->image.buffer ) );
+
+				if (ct->data) gf_free(ct->data);
+				ct->data = NULL;
+				ct->data_len = 0;
+
+				e = gf_file_load_data(src_url ? src_url : ct->image.buffer, &ct->data, &ct->data_len);
+				if (e) {
+					GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to load CacheTexture data from file %s: %s\n", src_url ? src_url : ct->image.buffer, gf_error_to_string(e) ) );
 				}
+				if (ct->image.buffer) gf_free(ct->image.buffer);
 				ct->image.buffer = NULL;
 				if (src_url) gf_free(src_url);
 			}
 
 			/*BIFS decoded playback*/
 			switch (ct->objectTypeIndication) {
-			case GPAC_OTI_IMAGE_JPEG:
+			case GF_CODECID_JPEG:
 				out_size = 0;
-				e = gf_img_jpeg_dec((char *) ct->data, ct->data_len, &txh->width, &txh->height, &txh->pixelformat, NULL, &out_size, 3);
+				e = gf_img_jpeg_dec(ct->data, ct->data_len, &txh->width, &txh->height, &txh->pixelformat, NULL, &out_size, 3);
 				if (e==GF_BUFFER_TOO_SMALL) {
 					u32 BPP;
 					txh->data = gf_malloc(sizeof(char) * out_size);
 					if (txh->pixelformat==GF_PIXEL_GREYSCALE) BPP = 1;
 					else BPP = 3;
 
-					e = gf_img_jpeg_dec((char *) ct->data, ct->data_len, &txh->width, &txh->height, &txh->pixelformat, txh->data, &out_size, BPP);
+					e = gf_img_jpeg_dec(ct->data, ct->data_len, &txh->width, &txh->height, &txh->pixelformat, txh->data, &out_size, BPP);
 					if (e==GF_OK) {
 						gf_sc_texture_allocate(txh);
 						gf_sc_texture_set_data(txh);
@@ -337,12 +330,12 @@ static void imagetexture_update(GF_TextureHandler *txh)
 					}
 				}
 				break;
-			case GPAC_OTI_IMAGE_PNG:
+			case GF_CODECID_PNG:
 				out_size = 0;
-				e = gf_img_png_dec((char *) ct->data, ct->data_len, &txh->width, &txh->height, &txh->pixelformat, NULL, &out_size);
+				e = gf_img_png_dec(ct->data, ct->data_len, &txh->width, &txh->height, &txh->pixelformat, NULL, &out_size);
 				if (e==GF_BUFFER_TOO_SMALL) {
 					txh->data = gf_malloc(sizeof(char) * out_size);
-					e = gf_img_png_dec((char *) ct->data, ct->data_len, &txh->width, &txh->height, &txh->pixelformat, txh->data, &out_size);
+					e = gf_img_png_dec(ct->data, ct->data_len, &txh->width, &txh->height, &txh->pixelformat, txh->data, &out_size);
 					if (e==GF_OK) {
 						gf_sc_texture_allocate(txh);
 						gf_sc_texture_set_data(txh);
@@ -360,16 +353,14 @@ static void imagetexture_update(GF_TextureHandler *txh)
 				u32 i;
 				u8 hash[20];
 				FILE *cached_texture;
-				char szExtractName[GF_MAX_PATH], section[64], *opt, *src_url;
-				opt = (char *) gf_cfg_get_key(txh->compositor->user->config, "General", "CacheDirectory");
+				char szExtractName[GF_MAX_PATH], *opt, *src_url;
+				opt = (char *) gf_opts_get_key("core", "cache");
 				if (opt) {
-					strcpy(szExtractName, opt);
+					gf_strcpy(szExtractName, opt);
 				} else {
-					opt = gf_get_default_cache_directory();
-					strcpy(szExtractName, opt);
-					gf_free(opt);
+					gf_strcpy(szExtractName, gf_get_default_cache_directory());
 				}
-				strcat(szExtractName, "/");
+				gf_strcat(szExtractName, "/");
 				src_url = (char *) gf_scene_get_service_url( gf_node_get_graph(txh->owner ) );
 
 				gf_sha1_csum((u8 *)src_url, (u32) strlen(src_url), hash);
@@ -377,23 +368,24 @@ static void imagetexture_update(GF_TextureHandler *txh)
 					char t[3];
 					t[2] = 0;
 					sprintf(t, "%02X", hash[i]);
-					strcat(szExtractName, t);
+					gf_strcat(szExtractName, t);
 				}
-				strcat(szExtractName, "_");
+				gf_strcat(szExtractName, "_");
 
-				strcat(szExtractName, ct->cacheURL.buffer);
+				gf_strcat(szExtractName, ct->cacheURL.buffer);
 				cached_texture = gf_fopen(szExtractName, "wb");
 				if (cached_texture) {
-					gf_fwrite(ct->data, 1, ct->data_len, cached_texture);
+					gf_fwrite(ct->data, ct->data_len, cached_texture);
 					gf_fclose(cached_texture);
 				}
 
 				/*and write cache info*/
 				if (ct->expirationDate!=0) {
+					char section[64];
 					sprintf(section, "@cache=%p", ct);
-					gf_cfg_set_key(txh->compositor->user->config, section, "serviceURL", src_url);
-					gf_cfg_set_key(txh->compositor->user->config, section, "cacheFile", szExtractName);
-					gf_cfg_set_key(txh->compositor->user->config, section, "cacheName", ct->cacheURL.buffer);
+					gf_opts_set_key(section, "serviceURL", src_url);
+					gf_opts_set_key(section, "cacheFile", szExtractName);
+					gf_opts_set_key(section, "cacheName", ct->cacheURL.buffer);
 
 					if (ct->expirationDate>0) {
 						char exp[50];
@@ -401,9 +393,9 @@ static void imagetexture_update(GF_TextureHandler *txh)
 						gf_net_get_ntp(&sec, &frac);
 						sec += ct->expirationDate;
 						sprintf(exp, "%u", sec);
-						gf_cfg_set_key(txh->compositor->user->config, section, "expireAfterNTP", exp);
+						gf_opts_set_key(section, "expireAfterNTP", exp);
 					} else {
-						gf_cfg_set_key(txh->compositor->user->config, section, "expireAfterNTP", "0");
+						gf_opts_set_key(section, "expireAfterNTP", "0");
 					}
 				}
 			}
@@ -444,18 +436,18 @@ void compositor_init_imagetexture(GF_Compositor *compositor, GF_Node *node)
 
 		/*locate existing cache*/
 		url = gf_scene_get_service_url( gf_node_get_graph(node) );
-		count = gf_cfg_get_section_count(compositor->user->config);
+		count = gf_opts_get_section_count();
 		for (i=0; i<count; i++) {
 			const char *opt;
-			const char *name = gf_cfg_get_section_name(compositor->user->config, i);
+			const char *name = gf_opts_get_section_name(i);
 			if (strncmp(name, "@cache=", 7)) continue;
-			opt = gf_cfg_get_key(compositor->user->config, name, "serviceURL");
+			opt = gf_opts_get_key(name, "serviceURL");
 			if (!opt || stricmp(opt, url)) continue;
-			opt = gf_cfg_get_key(compositor->user->config, name, "cacheName");
+			opt = gf_opts_get_key(name, "cacheName");
 			if (opt && ct->cacheURL.buffer && !stricmp(opt, ct->cacheURL.buffer)) {
-				opt = gf_cfg_get_key(compositor->user->config, name, "cacheFile");
-				if (opt) gf_delete_file((char*)opt);
-				gf_cfg_del_section(compositor->user->config, name);
+				opt = gf_opts_get_key(name, "cacheFile");
+				if (opt) gf_file_delete((char*)opt);
+				gf_opts_del_section(name);
 				break;
 			}
 		}
@@ -523,7 +515,7 @@ static void pixeltexture_update(GF_TextureHandler *txh)
 
 
 	/*pixel texture doesn not use any media object but has data in the content.
-	However we still use the same texture object, just be carefull not to use media funtcions*/
+	However we still use the same texture object, just be careful not to use media funtcions*/
 	txh->transparent = 0;
 	stride = pt->image.width;
 	/*num_components are as in VRML (1->4) not as in BIFS bitstream (0->3)*/
@@ -537,7 +529,7 @@ static void pixeltexture_update(GF_TextureHandler *txh)
 		stride *= 2;
 		break;
 	case 3:
-		pix_format = GF_PIXEL_RGB_24;
+		pix_format = GF_PIXEL_RGB;
 		txh->transparent = 0;
 		stride *= 3;
 		break;
@@ -558,17 +550,16 @@ static void pixeltexture_update(GF_TextureHandler *txh)
 	if (st->pixels) gf_free(st->pixels);
 	st->pixels = (char*)gf_malloc(sizeof(char) * stride * pt->image.height);
 	/*FIXME FOR OPENGL !!*/
-	if (0) {
-		for (i=0; i<pt->image.height; i++) {
-			memcpy(st->pixels + i * stride, pt->image.pixels + i * stride, stride);
-		}
+#if 0
+	for (i=0; i<pt->image.height; i++) {
+		memcpy(st->pixels + i * stride, pt->image.pixels + i * stride, stride);
 	}
+#else
 	/*revert pixel ordering...*/
-	else {
-		for (i=0; i<pt->image.height; i++) {
-			memcpy(st->pixels + i * stride, pt->image.pixels + (pt->image.height - 1 - i) * stride, stride);
-		}
+	for (i=0; i<pt->image.height; i++) {
+		memcpy(st->pixels + i * stride, pt->image.pixels + (pt->image.height - 1 - i) * stride, stride);
 	}
+#endif
 
 	txh->width = pt->image.width;
 	txh->height = pt->image.height;
@@ -623,7 +614,68 @@ void compositor_init_mattetexture(GF_Compositor *compositor, GF_Node *node)
 	gf_node_set_private(node, txh);
 	gf_node_set_callback_function(node, imagetexture_destroy);
 }
-#ifdef __cplusplus
-}
+
+void gf_sc_mo_destroyed(GF_Node *n)
+{
+	void *st = gf_node_get_private(n);
+	if (!st) return;
+
+	switch (gf_node_get_tag(n)) {
+	case TAG_MPEG4_Background2D:
+		((Background2DStack *)st)->txh.stream = NULL;
+		break;
+	case TAG_MPEG4_Background:
+#ifndef GPAC_DISABLE_X3D
+	case TAG_X3D_Background:
 #endif
-#endif /*GPAC_DISABLE_VRML*/
+#ifndef GPAC_DISABLE_3D
+		((BackgroundStack *)st)->txh_back.stream = NULL;
+		((BackgroundStack *)st)->txh_front.stream = NULL;
+		((BackgroundStack *)st)->txh_left.stream = NULL;
+		((BackgroundStack *)st)->txh_right.stream = NULL;
+		((BackgroundStack *)st)->txh_top.stream = NULL;
+		((BackgroundStack *)st)->txh_bottom.stream = NULL;
+#endif
+		break;
+	case TAG_MPEG4_ImageTexture:
+#ifndef GPAC_DISABLE_X3D
+	case TAG_X3D_ImageTexture:
+#endif
+		((GF_TextureHandler *)st)->stream = NULL;
+		break;
+	case TAG_MPEG4_MovieTexture:
+#ifndef GPAC_DISABLE_X3D
+	case TAG_X3D_MovieTexture:
+#endif
+		((MovieTextureStack *)st)->txh.stream = NULL;
+		break;
+	case TAG_MPEG4_MediaSensor:
+		((MediaSensorStack *)st)->stream = NULL;
+		break;
+	case TAG_MPEG4_MediaControl:
+		((MediaControlStack *)st)->stream = NULL;
+		break;
+	case TAG_MPEG4_AudioSource:
+		((AudioSourceStack *)st)->input.stream = NULL;
+		break;
+	case TAG_MPEG4_AudioClip:
+#ifndef GPAC_DISABLE_X3D
+	case TAG_X3D_AudioClip:
+#endif
+		((AudioClipStack *)st)->input.stream = NULL;
+		break;
+#ifndef GPAC_DISABLE_SVG
+	case TAG_SVG_video:
+	case TAG_SVG_image:
+		((SVG_video_stack *)st)->txh.stream = NULL;
+		break;
+	case TAG_SVG_audio:
+		((SVG_audio_stack *)st)->input.stream = NULL;
+		break;
+#endif
+	default:
+		break;
+	}
+}
+
+#endif //!defined(GPAC_DISABLE_VRML) && !defined(GPAC_DISABLE_COMPOSITOR)

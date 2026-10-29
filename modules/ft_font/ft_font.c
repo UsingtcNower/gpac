@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / FreeType font engine module
@@ -28,6 +28,9 @@
 #include <gpac/list.h>
 #include <gpac/utf.h>
 #include <gpac/tools.h>
+
+#ifndef GPAC_DISABLE_EVG
+
 
 #if !defined(__GNUC__)
 # if defined(_WIN32_WCE)
@@ -56,6 +59,7 @@ typedef struct
 
 	/*default fonts*/
 	char *font_serif, *font_sans, *font_fixed, *font_default;
+	Bool cache_checked;
 } FTBuilder;
 
 static const char * BEST_FIXED_FONTS[] = {
@@ -91,8 +95,6 @@ static const char * BEST_SANS_FONTS[] = {
  */
 static Bool isBestFontFor(const char * listOfFonts[], const char * currentBestFont, const char * fontName) {
 	u32 i;
-	assert( fontName );
-	assert( listOfFonts );
 	for (i = 0 ; listOfFonts[i]; i++) {
 		const char * best = listOfFonts[i];
 		if (!stricmp(best, fontName))
@@ -123,7 +125,7 @@ static Bool ft_enum_fonts(void *cbck, char *file_name, char *file_path, GF_FileE
 	GF_FontReader *dr = cbck;
 	FTBuilder *ftpriv = dr->udta;
 
-	GF_LOG(GF_LOG_DEBUG, GF_LOG_PARSER, ("[FreeType] Enumerating font %s (%s)\n", file_name, file_path));
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_MODULE, ("[FreeType] Enumerating font %s (%s)\n", file_name, file_path));
 
 	if (FT_New_Face(ftpriv->library, file_path, 0, & face )) return 0;
 	if (!face || !face->family_name) return 0;
@@ -135,9 +137,29 @@ static Bool ft_enum_fonts(void *cbck, char *file_name, char *file_path, GF_FileE
 		/*only scan scalable fonts*/
 		if (face->face_flags & FT_FACE_FLAG_SCALABLE) {
 			Bool bold, italic;
-			szfont = gf_malloc(sizeof(char)* (strlen(face->family_name)+100));
+			szfont = gf_strdup(face->family_name);
 			if (!szfont) continue;
-			strcpy(szfont, face->family_name);
+			
+			bold = italic = 0;
+			if (face->style_name) {
+				char *name = gf_strdup(face->style_name);
+				strupr(name);
+				if (strstr(name, "BOLD")) bold = 1;
+				if (strstr(name, "ITALIC")) italic = 1;
+				/*if font is not regular style, append all styles blindly*/
+				if (!strstr(name, "REGULAR")) {
+					gf_dynstrcat(&szfont, " ", NULL);
+					gf_dynstrcat(&szfont, face->style_name, NULL);
+				}
+				gf_free(name);
+			} else {
+				if (face->style_flags & FT_STYLE_FLAG_BOLD) bold = 1;
+				if (face->style_flags & FT_STYLE_FLAG_ITALIC) italic = 1;
+
+				if (bold) gf_dynstrcat(&szfont, " Bold", NULL);
+				if (italic) gf_dynstrcat(&szfont, " Italic", NULL);
+			}
+			gf_opts_set_key("FontCache", szfont, file_path);
 
 			/*remember first font found which looks like a alphabetical one*/
 			if (!ftpriv->font_default) {
@@ -150,31 +172,24 @@ static Bool ft_enum_fonts(void *cbck, char *file_name, char *file_path, GF_FileE
 				if (gidx) ftpriv->font_default = gf_strdup(szfont);
 			}
 
-			bold = italic = 0;
-
-			if (face->style_name) {
-				char *name = gf_strdup(face->style_name);
-				strupr(name);
-				if (strstr(name, "BOLD")) bold = 1;
-				if (strstr(name, "ITALIC")) italic = 1;
-				/*if font is not regular style, append all styles blindly*/
-				if (!strstr(name, "REGULAR")) {
-					strcat(szfont, " ");
-					strcat(szfont, face->style_name);
-				}
-				gf_free(name);
-			} else {
-				if (face->style_flags & FT_STYLE_FLAG_BOLD) bold = 1;
-				if (face->style_flags & FT_STYLE_FLAG_ITALIC) italic = 1;
-
-				if (bold) strcat(szfont, " Bold");
-				if (italic) strcat(szfont, " Italic");
-			}
-			gf_modules_set_option((GF_BaseInterface *)dr, "FontEngine", szfont, file_path);
-
 			/*try to assign default fixed fonts*/
 			if (!bold && !italic) {
-				strcpy(szfont, face->family_name);
+
+				/* if a bold or italic default has been set, prefer a regular one */
+				if (ftpriv->font_default && (strstr(ftpriv->font_default, " Bold") || strstr(ftpriv->font_default, " Italic"))) {
+					u32 gidx;
+					FT_Select_Charmap(face, FT_ENCODING_UNICODE);
+					gidx = FT_Get_Char_Index(face, (u32) 'a');
+					if (gidx) gidx = FT_Get_Char_Index(face, (u32) 'z');
+					if (gidx) gidx = FT_Get_Char_Index(face, (u32) '1');
+					if (gidx) gidx = FT_Get_Char_Index(face, (u32) '@');
+					if (gidx) {
+						gf_free(ftpriv->font_default);
+						ftpriv->font_default = gf_strdup(szfont);
+					}
+				}
+				if (szfont) gf_free(szfont);
+				szfont = gf_strdup(face->family_name);
 				strlwr(szfont);
 
 				if (face->face_flags & FT_FACE_FLAG_FIXED_WIDTH) {
@@ -198,7 +213,7 @@ static Bool ft_enum_fonts(void *cbck, char *file_name, char *file_path, GF_FileE
 
 static Bool ft_enum_fonts_dir(void *cbck, char *file_name, char *file_path, GF_FileEnumInfo *file_info)
 {
-	GF_LOG(GF_LOG_DEBUG, GF_LOG_PARSER, ("[FreeType] Scanning directory %s (%s)\n", file_name, file_path));
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_MODULE, ("[FreeType] Scanning directory %s (%s)\n", file_name, file_path));
 	gf_enum_directory(file_path, 0, ft_enum_fonts, cbck, "ttf;ttc");
 	return (gf_enum_directory(file_path, 1, ft_enum_fonts_dir, cbck, NULL)==GF_OK) ? GF_FALSE : GF_TRUE;
 }
@@ -207,24 +222,15 @@ static Bool ft_enum_fonts_dir(void *cbck, char *file_name, char *file_path, GF_F
 static void ft_rescan_fonts(GF_FontReader *dr)
 {
 	u32 i, count;
-	GF_Config *cfg = gf_modules_get_config((GF_BaseInterface *)dr);
 	FTBuilder *ftpriv = (FTBuilder *)dr->udta;
 
-	GF_LOG(GF_LOG_INFO, GF_LOG_PARSER, ("[FreeType] Rescaning %d font directories\n", gf_list_count(ftpriv->font_dirs) ));
+	ftpriv->cache_checked = GF_TRUE;
 
-	count = gf_cfg_get_key_count(cfg, "FontEngine");
-	for (i=0; i<count; i++) {
-		const char *key = gf_cfg_get_key_name(cfg, "FontEngine", i);
-		if (!strcmp(key, "FontReader")) continue;
-		if (!strcmp(key, "FontDirectory")) continue;
-		if (!strcmp(key, "RescanFonts")) continue;
-		/*any other persistent options should go here*/
+	GF_LOG(GF_LOG_INFO, GF_LOG_MODULE, ("[FreeType] Rescaning %d font directories\n", gf_list_count(ftpriv->font_dirs) ));
 
-		gf_cfg_set_key(cfg, "FontEngine", key, NULL);
-		count--;
-		i--;
-	}
-	gf_modules_set_option((GF_BaseInterface *)dr, "FontEngine", "RescanFonts", "no");
+	gf_opts_del_section("FontCache");
+	gf_opts_del_section("temp_freetype");
+	gf_opts_set_key("core", "rescan-fonts", "no");
 
 	if (ftpriv->font_fixed) gf_free(ftpriv->font_fixed);
 	ftpriv->font_fixed = NULL;
@@ -255,34 +261,34 @@ static void ft_rescan_fonts(GF_FontReader *dr)
 	ftpriv->font_serif = NULL;
 
 	/* let's check we have fonts that match our default Bold/Italic/BoldItalic conventions*/
-	count = gf_cfg_get_key_count(cfg, "FontEngine");
+	count = gf_opts_get_key_count("FontCache");
 	for (i=0; i<count; i++) {
 		const char *opt;
 		char fkey[GF_MAX_PATH];
-		const char *key = gf_cfg_get_key_name(cfg, "FontEngine", i);
-		opt = gf_cfg_get_key(cfg, "FontEngine", key);
+		const char *key = gf_opts_get_key_name("FontCache", i);
+		if (!key) continue;
+		opt = gf_opts_get_key("FontCache", key);
 		if (!strchr(opt, '/') && !strchr(opt, '\\')) continue;
-		if (!strcmp(key, "FontDirectory")) continue;
 
 		if (strstr(key, "Bold")) continue;
 		if (strstr(key, "Italic")) continue;
 
-		strcpy(fkey, key);
-		strcat(fkey, " Italic");
-		opt = gf_cfg_get_key(cfg, "FontEngine", fkey);
+		gf_strcpy(fkey, key);
+		gf_strcat(fkey, " Italic");
+		opt = gf_opts_get_key("FontCache", fkey);
 		if (!opt) continue;
 
-		strcpy(fkey, key);
-		strcat(fkey, " Bold");
-		opt = gf_cfg_get_key(cfg, "FontEngine", fkey);
+		gf_strcpy(fkey, key);
+		gf_strcat(fkey, " Bold");
+		opt = gf_opts_get_key("FontCache", fkey);
 		if (!opt) continue;
 
-		strcpy(fkey, key);
-		strcat(fkey, " Bold Italic");
-		opt = gf_cfg_get_key(cfg, "FontEngine", fkey);
+		gf_strcpy(fkey, key);
+		gf_strcat(fkey, " Bold Italic");
+		opt = gf_opts_get_key("FontCache", fkey);
 		if (!opt) continue;
 
-		strcpy(fkey, key);
+		gf_strcpy(fkey, key);
 		strlwr(fkey);
 
 		/*this font is suited for our case*/
@@ -306,11 +312,12 @@ static void ft_rescan_fonts(GF_FontReader *dr)
 	if (!ftpriv->font_sans) ftpriv->font_sans = gf_strdup(ftpriv->font_default ? ftpriv->font_default : "");
 	if (!ftpriv->font_fixed) ftpriv->font_fixed = gf_strdup(ftpriv->font_default ? ftpriv->font_default : "");
 
-	gf_modules_set_option((GF_BaseInterface *)dr, "FontEngine", "FontFixed", ftpriv->font_fixed);
-	gf_modules_set_option((GF_BaseInterface *)dr, "FontEngine", "FontSerif", ftpriv->font_serif);
-	gf_modules_set_option((GF_BaseInterface *)dr, "FontEngine", "FontSans", ftpriv->font_sans);
+	gf_opts_set_key("FontCache", "FontFixed", ftpriv->font_fixed);
+	gf_opts_set_key("FontCache", "FontSerif", ftpriv->font_serif);
+	gf_opts_set_key("FontCache", "FontSans", ftpriv->font_sans);
+	gf_opts_save();
 
-	GF_LOG(GF_LOG_INFO, GF_LOG_PARSER, ("[FreeType] Font directories scanned\n"));
+	GF_LOG(GF_LOG_INFO, GF_LOG_MODULE, ("[FreeType] Font directories scanned - defaults: SANS %s FIXED %s SERIF %s\n", ftpriv->font_sans, ftpriv->font_fixed, ftpriv->font_serif));
 }
 
 
@@ -318,15 +325,29 @@ static void ft_rescan_fonts(GF_FontReader *dr)
 static GF_Err ft_init_font_engine(GF_FontReader *dr)
 {
 	const char *sOpt;
+	u32 rescan = 0;
+	GF_Err e;
 	FTBuilder *ftpriv = (FTBuilder *)dr->udta;
-
-	sOpt = gf_modules_get_option((GF_BaseInterface *)dr, "FontEngine", "FontDirectory");
-	if (!sOpt) return GF_BAD_PARAM;
 
 	/*inits freetype*/
 	if (FT_Init_FreeType(&ftpriv->library) ) {
-		GF_LOG(GF_LOG_ERROR, GF_LOG_PARSER, ("[FreeType] Cannot initialize FreeType\n"));
+		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[FreeType] Cannot initialize FreeType\n"));
 		return GF_IO_ERR;
+	}
+
+	if (!gf_opts_get_key_count("FontCache"))
+		rescan = 1;
+	else {
+		sOpt = gf_opts_get_key("core", "rescan-fonts");
+		if (!sOpt || !strcmp(sOpt, "yes") )
+			rescan = 1;
+	}
+
+rescan_font_dirs:
+	sOpt = gf_opts_get_key("core", "font-dirs");
+	if (!sOpt) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[FreeType] No fonts directory indicated!"));
+		return GF_BAD_PARAM;
 	}
 
 	while (sOpt) {
@@ -334,7 +355,7 @@ static GF_Err ft_init_font_engine(GF_FontReader *dr)
 		char *sep = (char *) strchr(sOpt, ',');
 		if (sep) sep[0] = 0;
 
-		strcpy(dir, sOpt);
+		gf_strcpy(dir, sOpt);
 		while ( (dir[strlen(dir)-1] == '\n') || (dir[strlen(dir)-1] == '\r') )
 			dir[strlen(dir)-1] = 0;
 
@@ -342,7 +363,7 @@ static GF_Err ft_init_font_engine(GF_FontReader *dr)
 			char ext[2];
 			ext[0] = GF_PATH_SEPARATOR;
 			ext[1] = 0;
-			strcat(dir, ext);
+			gf_strcat(dir, ext);
 		}
 
 		gf_list_add(ftpriv->font_dirs, gf_strdup(dir) );
@@ -352,25 +373,71 @@ static GF_Err ft_init_font_engine(GF_FontReader *dr)
 		sOpt = sep+1;
 	}
 
-	sOpt = gf_modules_get_option((GF_BaseInterface *)dr, "FontEngine", "RescanFonts");
-	if (!sOpt || !strcmp(sOpt, "yes") )
+rescan_fonts:
+	if (rescan)
 		ft_rescan_fonts(dr);
 
 	if (!ftpriv->font_serif) {
-		sOpt = gf_modules_get_option((GF_BaseInterface *)dr, "FontEngine", "FontSerif");
+		sOpt = gf_opts_get_key("FontCache", "FontSerif");
 		ftpriv->font_serif = gf_strdup(sOpt ? sOpt : "");
 	}
 
 	if (!ftpriv->font_sans) {
-		sOpt = gf_modules_get_option((GF_BaseInterface *)dr, "FontEngine", "FontSans");
+		sOpt = gf_opts_get_key("FontCache", "FontSans");
 		ftpriv->font_sans = gf_strdup(sOpt ? sOpt : "");
 	}
 
 	if (!ftpriv->font_fixed) {
-		sOpt = gf_modules_get_option((GF_BaseInterface *)dr, "FontEngine", "FontFixed");
+		sOpt = gf_opts_get_key("FontCache", "FontFixed");
 		ftpriv->font_fixed = gf_strdup(sOpt ? sOpt : "");
 	}
-	GF_LOG(GF_LOG_DEBUG, GF_LOG_PARSER, ("[FreeType] Init OK - %d font directory (first %s)\n", gf_list_count(ftpriv->font_dirs), gf_list_get(ftpriv->font_dirs, 0) ));
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_MODULE, ("[FreeType] Init OK - %d font directory (first %s)\n", gf_list_count(ftpriv->font_dirs), gf_list_get(ftpriv->font_dirs, 0) ));
+
+	e = dr->set_font(dr, ftpriv->font_serif, 0);
+	if (!e) e = dr->set_font(dr, ftpriv->font_sans, 0);
+	if (!e) e = dr->set_font(dr, ftpriv->font_fixed, 0);
+	if (!e) return GF_OK;
+
+	if (rescan==3)
+		return e;
+
+	if (ftpriv->font_serif) gf_free(ftpriv->font_serif);
+	ftpriv->font_serif = NULL;
+	if (ftpriv->font_sans) gf_free(ftpriv->font_sans);
+	ftpriv->font_sans = NULL;
+	if (ftpriv->font_fixed) gf_free(ftpriv->font_fixed);
+	ftpriv->font_fixed = NULL;
+
+	//error and we rescanned font dirs, restore default fonts
+	if (e && ftpriv->cache_checked)
+		rescan = 2;
+
+	if (!rescan) {
+		sOpt = gf_opts_get_key("core", "font-dirs");
+		rescan = 2;
+		if (sOpt) {
+			GF_LOG(GF_LOG_WARNING, GF_LOG_MODULE, ("[FreeType] Default fonts not valid, rescanning font directories %s\n", sOpt));
+			goto rescan_fonts;
+		}
+	}
+	if (rescan==2) {
+		void gf_get_default_font_dir(char szPath[GF_MAX_PATH]);
+
+		char szPath[GF_MAX_PATH];
+		//check if font directory is default one, if not reset and rescan
+		gf_get_default_font_dir(szPath);
+		sOpt = gf_opts_get_key("core", "font-dirs");
+		if (sOpt && !strcmp(sOpt, szPath))
+			return e;
+
+		GF_LOG(GF_LOG_WARNING, GF_LOG_MODULE, ("[FreeType] No fonts found in %s, restoring default directories %s and rescanning\n", sOpt, szPath));
+		gf_opts_set_key("core", "font-dirs", szPath);
+		rescan = 3;
+		while (gf_list_count(ftpriv->font_dirs)) {
+			gf_free(gf_list_pop_back(ftpriv->font_dirs));
+		}
+		goto rescan_font_dirs;
+	}
 
 	return GF_OK;
 }
@@ -382,8 +449,7 @@ static GF_Err ft_shutdown_font_engine(GF_FontReader *dr)
 	ftpriv->active_face = NULL;
 	/*reset loaded fonts*/
 	while (gf_list_count(ftpriv->loaded_fonts)) {
-		FT_Face face = gf_list_get(ftpriv->loaded_fonts, 0);
-		gf_list_rem(ftpriv->loaded_fonts, 0);
+		FT_Face face = gf_list_pop_front(ftpriv->loaded_fonts);
 		FT_Done_Face(face);
 	}
 
@@ -443,68 +509,124 @@ static FT_Face ft_font_in_cache(FTBuilder *ft, const char *fontName, u32 styles)
 
 static GF_Err ft_set_font(GF_FontReader *dr, const char *OrigFontName, u32 styles)
 {
-	char *fname;
+	GF_Err e = GF_OK;
+	char *fname=NULL;
 	char *fontName;
 	const char *opt;
+	Bool is_def_font = GF_FALSE;
+	Bool no_style_check = GF_FALSE;
 	FTBuilder *ftpriv = (FTBuilder *)dr->udta;
 
 	fontName = (char *) OrigFontName;
 	ftpriv->active_face = NULL;
 
+	opt = gf_opts_get_key("temp_freetype", OrigFontName);
+	if (opt) return GF_NOT_SUPPORTED;
+
 	if (!fontName || !strlen(fontName) || !stricmp(fontName, "SERIF")) {
 		fontName = ftpriv->font_serif;
+		is_def_font = GF_TRUE;
+		OrigFontName = "";
 	}
 	else if (!stricmp(fontName, "SANS") || !stricmp(fontName, "sans-serif")) {
 		fontName = ftpriv->font_sans;
+		is_def_font = GF_TRUE;
+		OrigFontName = "SANS";
 	}
 	else if (!stricmp(fontName, "TYPEWRITER") || !stricmp(fontName, "monospace")) {
 		fontName = ftpriv->font_fixed;
+		is_def_font = GF_TRUE;
+		OrigFontName = "TYPEWRITER";
+	}
+	if (!styles) {
+		if (ftpriv->font_fixed && !strcmp(fontName, ftpriv->font_fixed)) no_style_check = GF_TRUE;
+		else if (ftpriv->font_sans && !strcmp(fontName, ftpriv->font_sans)) no_style_check = GF_TRUE;
+		else if (ftpriv->font_serif && !strcmp(fontName, ftpriv->font_serif)) no_style_check = GF_TRUE;
 	}
 
 	/*first look in loaded fonts*/
 	ftpriv->active_face = ft_font_in_cache(ftpriv, fontName, styles);
 	if (ftpriv->active_face) return GF_OK;
 
-	/*check cfg file - gf_free(type is slow at loading fonts so we keep the (font name + styles)=fontfile associations
-	in the cfg file*/
-	if (!fontName || !strlen(fontName)) return GF_NOT_SUPPORTED;
-	fname = gf_malloc(sizeof(char) * (strlen(fontName) + 50));
-
-	{
-		int checkStyles = (styles & GF_FONT_WEIGHT_BOLD) | (styles & GF_FONT_ITALIC);
-checkFont:
-		strcpy(fname, fontName);
-		if (styles & GF_FONT_WEIGHT_BOLD & checkStyles) strcat(fname, " Bold");
-		if (styles & GF_FONT_ITALIC & checkStyles) strcat(fname, " Italic");
-
-		opt = gf_modules_get_option((GF_BaseInterface *)dr, "FontEngine", fname);
-
-		if (opt) {
-			FT_Face face;
-			gf_free(fname);
-			if (FT_New_Face(ftpriv->library, opt, 0, & face )) return GF_IO_ERR;
-			if (!face) return GF_IO_ERR;
-			gf_list_add(ftpriv->loaded_fonts, face);
-			ftpriv->active_face = face;
-			return GF_OK;
+	//we likely have a problem with the font cache, rebuild if
+	if (!fontName || !strlen(fontName)) {
+		if (is_def_font && !ftpriv->cache_checked) {
+			GF_LOG(GF_LOG_INFO, GF_LOG_MODULE, ("[FreeType] No default font set, rescanning fonts\n"));
+			ft_rescan_fonts(dr);
+			return ft_set_font(dr, OrigFontName, styles);
 		}
-		if (checkStyles) {
-			/* If we tried font + bold + italic -> we will try font + [bold | italic]
-			   If we tried font + [bold | italic] -> we try font
-			     */
-			if (checkStyles == (GF_FONT_WEIGHT_BOLD | GF_FONT_ITALIC))
-				checkStyles = GF_FONT_WEIGHT_BOLD;
-			else if (checkStyles == GF_FONT_WEIGHT_BOLD && (styles & GF_FONT_ITALIC))
-				checkStyles = GF_FONT_ITALIC;
-			else if (checkStyles == GF_FONT_WEIGHT_BOLD || checkStyles == GF_FONT_ITALIC)
-				checkStyles = 0;
-			goto checkFont;
-		}
+		return GF_NOT_SUPPORTED;
 	}
 
-	GF_LOG(GF_LOG_WARNING, GF_LOG_PARSER, ("[FreeType] Font '%s' (%s) not found\n", fontName, fname));
+	int checkStyles = (styles & GF_FONT_WEIGHT_BOLD) | (styles & GF_FONT_ITALIC);
+
+checkFont:
+	if (fname) gf_free(fname);
+	fname = gf_strdup(fontName);
+	if (checkStyles & GF_FONT_WEIGHT_BOLD) gf_dynstrcat(&fname, " Bold", NULL);
+	if (checkStyles & GF_FONT_ITALIC) gf_dynstrcat(&fname, " Italic", NULL);
+
+	opt = gf_opts_get_key("FontCache", fname);
+
+	if (opt) {
+		u32 i, num_faces;
+		FT_Face face;
+
+		//check font is in cache
+		ftpriv->active_face = ft_font_in_cache(ftpriv, fname, checkStyles);
+		if (ftpriv->active_face) {
+			gf_free(fname);
+			return GF_OK;
+		}
+
+		//load face
+		if (FT_New_Face(ftpriv->library, opt, 0, & face) || !face) {
+			e = GF_IO_ERR;
+			goto exit;
+		}
+
+		//handle collections, figure out which face matches our styles
+		num_faces = face->num_faces;
+		for (i=0; i<num_faces; i++) {
+			if (no_style_check || ft_check_face(face, NULL, checkStyles)) {
+				gf_free(fname);
+				gf_list_add(ftpriv->loaded_fonts, face);
+				ftpriv->active_face = face;
+				return GF_OK;
+			}
+			FT_Done_Face(face);
+			if (i+1==num_faces) break;
+
+			/*load next font in collection*/
+			if (FT_New_Face(ftpriv->library, opt, i+1, & face ))
+				break;
+			if (!face)
+				break;
+		}
+	}
+	if (checkStyles) {
+		//we tried bold italic, try bold
+		if (checkStyles == (GF_FONT_WEIGHT_BOLD | GF_FONT_ITALIC))
+			checkStyles = GF_FONT_WEIGHT_BOLD;
+		//we tried bold at previous pass, and input styles had italic, try italic
+		else if ((checkStyles == GF_FONT_WEIGHT_BOLD) && (styles & GF_FONT_ITALIC))
+			checkStyles = GF_FONT_ITALIC;
+		//otherwise try with no style
+		else if ((checkStyles == GF_FONT_WEIGHT_BOLD) || (checkStyles == GF_FONT_ITALIC))
+			checkStyles = 0;
+		goto checkFont;
+	}
+
+exit:
+	if (e) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[FreeType] Error loading font %s (%s): %s\n", fontName, fname, gf_error_to_string(e) ));
+	} else {
+		GF_LOG(GF_LOG_INFO, GF_LOG_MODULE, ("[FreeType] Font %s (%s) not found\n", fontName, fname));
+		e = GF_NOT_SUPPORTED;
+	}
 	gf_free(fname);
-	return GF_NOT_SUPPORTED;
+	gf_opts_set_key("temp_freetype", OrigFontName, "not found");
+	return e;
 }
 
 static GF_Err ft_get_font_info(GF_FontReader *dr, char **font_name, u32 *em_size, s32 *ascent, s32 *descent, s32 *underline, s32 *line_spacing, s32 *max_advance_h, s32 *max_advance_v)
@@ -526,7 +648,6 @@ static GF_Err ft_get_font_info(GF_FontReader *dr, char **font_name, u32 *em_size
 
 static GF_Err ft_get_glyphs(GF_FontReader *dr, const char *utf_string, u32 *glyph_buffer, u32 *io_glyph_buffer_size, const char *xml_lang, Bool *is_rtl)
 {
-	size_t _len;
 	u32 len;
 	u32 i;
 	u16 *conv;
@@ -546,9 +667,8 @@ static GF_Err ft_get_glyphs(GF_FontReader *dr, const char *utf_string, u32 *glyp
 		*io_glyph_buffer_size = len+1;
 		return GF_BUFFER_TOO_SMALL;
 	}
-	_len = gf_utf8_mbstowcs((u16*) glyph_buffer, *io_glyph_buffer_size, (const char **) &utf8);
-	if (_len==(size_t)-1) return GF_IO_ERR;
-	len = (u32) _len;
+	len = gf_utf8_mbstowcs((u16*) glyph_buffer, *io_glyph_buffer_size, (const char **) &utf8);
+	if (len == GF_UTF8_FAIL) return GF_IO_ERR;
 	if (utf8) return GF_IO_ERR;
 
 	/*perform bidi relayout*/
@@ -573,7 +693,7 @@ typedef struct
 	s32 last_x, last_y;
 } ft_outliner;
 
-#if defined(GPAC_IPHONE) || defined(GPAC_ANDROID)
+#if defined(GPAC_CONFIG_ANDROID)
 #define FTCST
 #else
 #define FTCST const
@@ -635,7 +755,7 @@ static GF_Glyph *ft_load_glyph(GF_FontReader *dr, u32 glyph_name)
 	glyph_idx = FT_Get_Char_Index(ftpriv->active_face, glyph_name);
 	/*missing glyph*/
 	if (!glyph_idx) {
-		GF_LOG(GF_LOG_WARNING, GF_LOG_PARSER, ("[FreeType] Glyph not found for char %d in font %s (style %s)\n", glyph_name, ftpriv->active_face->family_name, ftpriv->active_face->style_name));
+		GF_LOG(GF_LOG_WARNING, GF_LOG_MODULE, ("[FreeType] Glyph not found for char %d in font %s (style %s)\n", glyph_name, ftpriv->active_face->family_name, ftpriv->active_face->style_name));
 		return NULL;
 	}
 
@@ -644,10 +764,8 @@ static GF_Glyph *ft_load_glyph(GF_FontReader *dr, u32 glyph_name)
 
 	FT_Get_Glyph(ftpriv->active_face->glyph, (FT_Glyph*)&outline);
 
-#ifdef FT_GLYPH_FORMAT_OUTLINE
 	/*oops not vectorial...*/
-	if (outline->root.format != FT_GLYPH_FORMAT_OUTLINE) return NULL;
-#endif
+	if (outline->root.format==FT_GLYPH_FORMAT_BITMAP) return NULL;
 
 
 	GF_SAFEALLOC(glyph, GF_Glyph);
@@ -693,7 +811,7 @@ static GF_FontReader *ft_load()
 	FTBuilder *ftpriv;
 	dr = gf_malloc(sizeof(GF_FontReader));
 	memset(dr, 0, sizeof(GF_FontReader));
-	GF_REGISTER_MODULE_INTERFACE(dr, GF_FONT_READER_INTERFACE, "FreeType Font Reader", "gpac distribution");
+	GF_REGISTER_MODULE_INTERFACE(dr, GF_FONT_READER_INTERFACE, "freetype", "gpac distribution");
 
 	ftpriv = gf_malloc(sizeof(FTBuilder));
 	memset(ftpriv, 0, sizeof(FTBuilder));
@@ -732,8 +850,6 @@ static void ft_delete(GF_BaseInterface *ifce)
 	if (ftpriv->font_sans) gf_free(ftpriv->font_sans);
 	if (ftpriv->font_fixed) gf_free(ftpriv->font_fixed);
 	if (ftpriv->font_default) gf_free(ftpriv->font_default);
-	assert(!gf_list_count(ftpriv->loaded_fonts) );
-
 	gf_list_del(ftpriv->loaded_fonts);
 
 	gf_free(dr->udta);
@@ -773,3 +889,4 @@ GPAC_MODULE_STATIC_DECLARATION( ftfont )
 
 #endif
 
+#endif //GPAC_DISABLE_EVG

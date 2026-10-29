@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2022
  *					All rights reserved
  *
  *  This file is part of GPAC / modules interfaces
@@ -33,7 +33,6 @@ extern "C" {
 
 #include <gpac/path2d.h>
 #include <gpac/module.h>
-#include <gpac/user.h>
 
 
 typedef struct _gf_glyph
@@ -87,7 +86,7 @@ enum
 #define GF_FONT_WEIGHT_MASK	0xFFFFFC00
 
 /*interface name and version for font engine*/
-#define GF_FONT_READER_INTERFACE		GF_4CC('G','F','T', '1')
+#define GF_FONT_READER_INTERFACE		GF_4CC('G','F','T', '5')
 
 
 typedef struct _font_reader

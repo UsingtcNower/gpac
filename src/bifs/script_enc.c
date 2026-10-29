@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2026
  *					All rights reserved
  *
  *  This file is part of GPAC / BIFS codec sub-project
@@ -31,7 +31,7 @@
 
 #include <gpac/internal/scenegraph_dev.h>
 
-#if !defined(GPAC_DISABLE_BIFS) && !defined(GPAC_DISABLE_BIFS_ENC) && defined(GPAC_HAS_SPIDERMONKEY)
+#if !defined(GPAC_DISABLE_BIFS) && !defined(GPAC_DISABLE_BIFS_ENC) && defined(GPAC_HAS_QJS)
 
 typedef struct
 {
@@ -57,7 +57,7 @@ typedef struct
 
 #define SFE_WRITE_INT(sc_enc, val, nbBits, str1, str2)	\
 		if (!sc_enc->emul) GF_BIFS_WRITE_INT(sc_enc->codec, sc_enc->bs, val, nbBits, str1, str2);	\
- 
+
 
 static GF_Err EncScriptFields(ScriptEnc *sc_enc)
 {
@@ -320,7 +320,7 @@ Bool SFE_NextToken(ScriptEnc *sc_enc)
 {
 	u32 i;
 	if (sc_enc->err) return GF_FALSE;
-	while (strchr(" \t\r\n", sc_enc->cur_buf[0])) {
+	while (sc_enc->cur_buf && sc_enc->cur_buf[0] && strchr(" \t\r\n", sc_enc->cur_buf[0])) {
 		if (sc_enc->cur_buf[0]=='\n') sc_enc->cur_line ++;
 		sc_enc->cur_buf++;
 	}
@@ -1037,7 +1037,7 @@ void SFE_Function(ScriptEnc *sc_enc)
 
 	SFE_NextToken(sc_enc);
 	SFE_CheckToken(sc_enc, TOK_IDENTIFIER);
-	strcpy(szName, sc_enc->token);
+	gf_strcpy(szName, sc_enc->token);
 	SFE_PutIdentifier(sc_enc, sc_enc->token);
 
 	SFE_NextToken(sc_enc);
@@ -1175,7 +1175,7 @@ void SFE_PutBoolean(ScriptEnc *sc_enc, char *str)
 		GF_LOG(GF_LOG_ERROR, GF_LOG_CODING, ("[bifs] Script encoding: Token %s read, %s expected\n", tok_names[curTok], tok_names[x])); \
 		sc_enc->err = GF_BAD_PARAM;	\
 	}	\
- 
+
 
 u32 TOK_To_ET(u32 tok)
 {
@@ -1257,11 +1257,12 @@ u32 TOK_To_ET(u32 tok)
 	case TOK_VAR:
 		return ET_VAR;
 	default:
-		assert(0);
+		gf_assert(0);
 		return (u32) -1;
 	}
 }
 
+#ifndef GPAC_DISABLE_LOG
 static const char *expr_name[] = {
 	"ET_CURVED_EXPR",
 	"ET_NEGATIVE",
@@ -1315,6 +1316,8 @@ static const char *expr_name[] = {
 	"ET_VAR",
 	"NUMBER_OF_EXPR_TYPE"
 };
+#endif
+
 
 #define NUMBER_OF_RANK	15
 static s32 ET_Rank[NUMBER_OF_EXPR_TYPE] =
@@ -1708,7 +1711,7 @@ skip_token:
 		SFE_CheckToken(sc_enc, TOK_SEMICOLON);
 		break;
 	default:
-		GF_LOG(GF_LOG_ERROR, GF_LOG_CODING, ("[bifs] Script encoding: illegal expression type %s\n", expr_name[expr]));
+		GF_LOG(GF_LOG_ERROR, GF_LOG_CODING, ("[bifs] Script encoding: illegal expression type %s\n", expr < GF_ARRAY_LENGTH(expr_name) ? expr_name[expr] : ""));
 		sc_enc->err = GF_BAD_PARAM;
 		break;
 	}
@@ -1830,4 +1833,4 @@ void SFE_Params(ScriptEnc *sc_enc, u32 start, u32 end)
 	}
 }
 
-#endif	/* !defined(GPAC_DISABLE_BIFS) && !defined(GPAC_DISABLE_BIFS_ENC) && defined(GPAC_HAS_SPIDERMONKEY) */
+#endif	/* !defined(GPAC_DISABLE_BIFS) && !defined(GPAC_DISABLE_BIFS_ENC) && defined(GPAC_HAS_QJS) */

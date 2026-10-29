@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2022
  *					All rights reserved
  *
  *  This file is part of GPAC / common tools sub-project
@@ -23,8 +23,6 @@
  *
  */
 
-#ifndef GPAC_DISABLE_CORE_TOOLS
-
 #include <gpac/token.h>
 
 static GFINLINE s32 gf_tok_is_char_in_set(const char TestChar, const char *TestSet)
@@ -41,6 +39,8 @@ GF_EXPORT
 s32 gf_token_get(const char *Buffer, s32 Start,  const char *Separator,  char *Container, s32 ContainerSize)
 {
 	s32 i, start, end, Len;
+	Container[0]=0;
+	if (Start<0) return -1;
 
 	Len = (s32) strlen( Buffer );
 	for (i=Start; i<Len; i++ ) {
@@ -62,6 +62,7 @@ s32 gf_token_get(const char *Buffer, s32 Start,  const char *Separator,  char *C
 	return (end+1);
 }
 
+GF_EXPORT
 s32 gf_token_get_strip(const char *Buffer, s32 Start, const char *Separator, const char *strip_set, char *Container, s32 ContainerSize)
 {
 	u32 i, k, len;
@@ -69,7 +70,7 @@ s32 gf_token_get_strip(const char *Buffer, s32 Start, const char *Separator, con
 	if (!strip_set || (res<0)) return res;
 	i=k=0;
 	len = (u32) strlen(Container);
-	while (strchr(strip_set, Container[i]) ) i++;
+	while (Container[i] && strchr(strip_set, Container[i]) ) i++;
 	while (len && strchr(strip_set, Container[len]) ) {
 		Container[len]=0;
 		len--;
@@ -87,7 +88,7 @@ GF_EXPORT
 s32 gf_token_get_line(const char *Buffer, u32 Start, u32 Size, char *LineBuffer, u32 LineBufferSize)
 {
 	u32 offset;
-	s32 i, End, Total;
+	s32 End, Total;
 	LineBuffer[0] = 0;
 	if (Start >= Size) return -1;
 
@@ -101,9 +102,9 @@ s32 gf_token_get_line(const char *Buffer, u32 Start, u32 Size, char *LineBuffer,
 	}
 
 	Total = End - Start + offset;
-	if ((u32) Total >= LineBufferSize) Total = LineBufferSize;
-	for (i=0; i<Total; i++) LineBuffer[i] = Buffer[Start+i];
-	LineBuffer[i] = 0;
+	if ((u32) Total >= LineBufferSize) Total = LineBufferSize-1;
+	memcpy(LineBuffer, Buffer + Start, Total);
+	LineBuffer[Total] = 0;
 	return (End + offset);
 }
 
@@ -133,4 +134,23 @@ s32 gf_token_find(const char *Buffer, u32 Start, u32 Size, const char *Pattern)
 	return -1;
 }
 
-#endif
+GF_EXPORT
+const char *gf_token_find_word(const char *in_str, const char *word, char *charsep)
+{
+	u32 len;
+	if (!in_str || !word) return NULL;
+	len = (u32) strlen(word);
+	while (in_str) {
+		char *sep = strstr(in_str, word);
+		if (!sep) return NULL;
+		if (!charsep) return sep;
+
+		if ((sep>in_str) && strchr(charsep, sep[-1]))
+			return sep;
+
+		if (strchr(charsep, sep[len]))
+			return sep;
+		in_str = sep+len;
+	}
+	return NULL;
+}

@@ -323,7 +323,7 @@ xmlNodeSetPtr findNodes( xmlXPathContextPtr ctxt, xmlChar * path )
 
 		if ( ctxt->node->doc == NULL ) {
 			/* if one XPaths a node from a fragment, libxml2 will
-			   refuse the lookup. this is not very usefull for XML
+			   refuse the lookup. this is not very useful for XML
 			   scripters. thus we need to create a temporary document
 			   to make libxml2 do it's job correctly.
 			 */
@@ -461,8 +461,6 @@ void setAttributeType(SVGGenAttribute *att)
 			strcpy(att->impl_type, "SVG_PointerEvents");
 		} else if (!strcmp(att->svg_name, "vector-effect")) {
 			strcpy(att->impl_type, "SVG_VectorEffect");
-		} else if (!strcmp(att->svg_name, "vector-effect")) {
-			strcpy(att->impl_type, "SVG_VectorEffect");
 		} else if (!strcmp(att->svg_name, "display-align")) {
 			strcpy(att->impl_type, "SVG_DisplayAlign");
 		} else if (!strcmp(att->svg_name, "text-align")) {
@@ -525,7 +523,7 @@ void setAttributeType(SVGGenAttribute *att)
 			strcpy(att->impl_type, "SVG_String");
 			fprintf(stdout, "Warning: using type SVG_String for attribute %s.\n", att->svg_name);
 		}
-	} else { /* for some attributes, the type given in the RNG needs to be overriden */
+	} else { /* for some attributes, the type given in the RNG needs to be overridden */
 		if (!strcmp(att->svg_name, "color")) {
 			strcpy(att->impl_type, "SVG_Paint");
 		} else if (!strcmp(att->svg_name, "viewport-fill")) {
@@ -559,7 +557,7 @@ void setAttributeType(SVGGenAttribute *att)
 				*tmp='_';
 				tmp++;
 			}
-			tmp = att->impl_type;;
+			tmp = att->impl_type;
 			if ( (tmp = strstr(tmp, "datatype")) ) {
 				tmp--;
 				*tmp = 0;
@@ -631,7 +629,7 @@ SVGGenAttrGrp *getOneGlobalAttrGrp(xmlDocPtr doc, xmlXPathContextPtr xpathCtx, x
 
 	/* attributes group already resolved */
 	for (j = 0; j < gf_list_count(globalAttrGrp); j++) {
-		SVGGenAttrGrp *attgrp = gf_list_get(globalAttrGrp, j);
+		attgrp = gf_list_get(globalAttrGrp, j);
 		if (!strcmp(attgrp->name, name)) {
 			return attgrp;
 		}

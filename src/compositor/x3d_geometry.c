@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -28,7 +28,7 @@
 #include "visual_manager.h"
 #include "drawable.h"
 
-#ifndef GPAC_DISABLE_X3D
+#if !defined(GPAC_DISABLE_X3D) && !defined(GPAC_DISABLE_COMPOSITOR)
 
 static void disk2d_check_changes(GF_Node *node, Drawable *stack, GF_TraverseState *tr_state)
 {
@@ -551,9 +551,11 @@ static void TraverseIndexedTriangleSet(GF_Node *node, void *rs, Bool is_destroy)
 
 static void ITS_SetIndex(GF_Node *node, GF_Route *route)
 {
-	X_IndexedTriangleSet *its = (X_IndexedTriangleSet*)node;
-	gf_sg_vrml_field_copy(&its->index, &its->set_index, GF_SG_VRML_MFINT32);
-	gf_sg_vrml_mf_reset(&its->set_index, GF_SG_VRML_MFINT32);
+	if (node) {
+		X_IndexedTriangleSet *its = (X_IndexedTriangleSet*)node;
+		gf_sg_vrml_field_copy(&its->index, &its->set_index, GF_SG_VRML_MFINT32);
+		gf_sg_vrml_mf_reset(&its->set_index, GF_SG_VRML_MFINT32);
+	}
 }
 
 void compositor_init_indexed_triangle_set(GF_Compositor *compositor, GF_Node *node)
@@ -562,6 +564,13 @@ void compositor_init_indexed_triangle_set(GF_Compositor *compositor, GF_Node *no
 	drawable_3d_new(node);
 	gf_node_set_callback_function(node, TraverseIndexedTriangleSet);
 	its->on_set_index = ITS_SetIndex;
+
+#ifdef GPAC_ENABLE_COVERAGE
+	if (gf_sys_is_cov_mode()) {
+		ITS_SetIndex(NULL, NULL);
+	}
+#endif
+
 }
 
 
@@ -808,9 +817,11 @@ static void TraverseIndexedTriangleStripSet(GF_Node *node, void *rs, Bool is_des
 
 static void ITSS_SetIndex(GF_Node *node, GF_Route *route)
 {
-	X_IndexedTriangleStripSet *itss = (X_IndexedTriangleStripSet*)node;
-	gf_sg_vrml_field_copy(&itss->index, &itss->set_index, GF_SG_VRML_MFINT32);
-	gf_sg_vrml_mf_reset(&itss->set_index, GF_SG_VRML_MFINT32);
+	if (node) {
+		X_IndexedTriangleStripSet *itss = (X_IndexedTriangleStripSet*)node;
+		gf_sg_vrml_field_copy(&itss->index, &itss->set_index, GF_SG_VRML_MFINT32);
+		gf_sg_vrml_mf_reset(&itss->set_index, GF_SG_VRML_MFINT32);
+	}
 }
 
 void compositor_init_indexed_triangle_strip_set(GF_Compositor *compositor, GF_Node *node)
@@ -819,6 +830,12 @@ void compositor_init_indexed_triangle_strip_set(GF_Compositor *compositor, GF_No
 	drawable_3d_new(node);
 	gf_node_set_callback_function(node, TraverseIndexedTriangleStripSet);
 	itss->on_set_index = ITSS_SetIndex;
+
+#ifdef GPAC_ENABLE_COVERAGE
+	if (gf_sys_is_cov_mode()) {
+		ITSS_SetIndex(NULL, NULL);
+	}
+#endif
 }
 
 
@@ -1037,9 +1054,11 @@ static void TraverseIndexedTriangleFanSet(GF_Node *node, void *rs, Bool is_destr
 
 static void ITFS_SetIndex(GF_Node *node, GF_Route *route)
 {
-	X_IndexedTriangleFanSet *itfs = (X_IndexedTriangleFanSet *)node;
-	gf_sg_vrml_field_copy(&itfs->index, &itfs->set_index, GF_SG_VRML_MFINT32);
-	gf_sg_vrml_mf_reset(&itfs->set_index, GF_SG_VRML_MFINT32);
+	if (node) {
+		X_IndexedTriangleFanSet *itfs = (X_IndexedTriangleFanSet *)node;
+		gf_sg_vrml_field_copy(&itfs->index, &itfs->set_index, GF_SG_VRML_MFINT32);
+		gf_sg_vrml_mf_reset(&itfs->set_index, GF_SG_VRML_MFINT32);
+	}
 }
 
 void compositor_init_indexed_triangle_fan_set(GF_Compositor *compositor, GF_Node *node)
@@ -1048,8 +1067,14 @@ void compositor_init_indexed_triangle_fan_set(GF_Compositor *compositor, GF_Node
 	drawable_3d_new(node);
 	gf_node_set_callback_function(node, TraverseIndexedTriangleFanSet);
 	itfs->on_set_index = ITFS_SetIndex;
+
+#ifdef GPAC_ENABLE_COVERAGE
+	if (gf_sys_is_cov_mode()) {
+		ITFS_SetIndex(NULL, NULL);
+	}
+#endif
 }
 
 #endif /*GPAC_DISABLE_3D*/
 
-#endif /*GPAC_DISABLE_X3D*/
+#endif // !defined(GPAC_DISABLE_X3D) && !defined(GPAC_DISABLE_COMPOSITOR)

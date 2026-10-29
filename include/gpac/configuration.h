@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2008-2012
+ *			Copyright (c) Telecom ParisTech 2008-2023
  *					All rights reserved
  *
  *  This file is part of GPAC
@@ -27,7 +27,18 @@
 #ifndef _GF_CONFIG_H_
 #define _GF_CONFIG_H_
 
+/*!
+\addtogroup setup_grp
+\brief Base data types
+
+This section documents the base data types of GPAC.
+
+@{
+*/
+
 #define GPAC_CONFIGURATION "(static configuration file)"
+
+
 
 /*this file defines all common macros for libgpac compilation
   except for symbian32 which uses .mmp directives ... */
@@ -35,22 +46,52 @@
 /*Configuration for visual studio, 32/64 bits */
 #if defined(_WIN32) && !defined(_WIN32_WCE)
 
+#define WIN32_LEAN_AND_MEAN
+
 #ifndef GPAC_MP4BOX_MINI
 
 #define GPAC_HAS_SSL
 
-#define GPAC_HAS_SPIDERMONKEY
+#define GPAC_HAS_QJS
+//codecs
 #define GPAC_HAS_JPEG
 #define GPAC_HAS_PNG
+#define GPAC_HAS_LIBA52
+#define GPAC_HAS_FAAD
+#define GPAC_HAS_JP2
+#define GPAC_HAS_MAD
+#define GPAC_HAS_OPENHEVC
+#define GPAC_HAS_OPENSVC
+#define GPAC_HAS_THEORA
+#define GPAC_HAS_VORBIS
+#define GPAC_HAS_XVID
+#define GPAC_HAS_FFMPEG
+#define GPAC_HAS_DTAPI
+#define GPAC_HAS_HTTP2
+#define GPAC_HAS_LIBCAPTION
+#define GPAC_HAS_MPEGHDECODER
+#define GPAC_HAS_LIBCACA
+#define GPAC_HAS_CURL
+#define GPAC_HAS_FD
 
-/*IPv6 enabled - for win32, this is evaluated at compile time, !! do not uncomment !!*/
+#ifdef _WIN64
+//#define GPAC_HAS_NGTCP2
+#endif
 
 #define GPAC_MEMORY_TRACKING
 
 /*Win32 IPv6 is evaluated at compile time, !! do not uncomment !!*/
 //#define GPAC_HAS_IPV6
 
+/*undefined at compil time if no poll support*/
+#define GPAC_HAS_POLL
+
 #define GPAC_HAS_GLU
+
+#ifndef GPAC_CONFIG_WIN32
+#define GPAC_CONFIG_WIN32
+#endif //GPAC_CONFIG_WIN32
+
 
 #endif /*GPAC_MP4BOX_MINI*/
 
@@ -75,7 +116,7 @@
 #endif
 
 
-#define GPAC_HAS_SPIDERMONKEY
+#define GPAC_HAS_QJS
 #define GPAC_HAS_JPEG
 #define GPAC_HAS_PNG
 
@@ -86,47 +127,68 @@
 /*Configuration for Android */
 #elif defined(GPAC_CONFIG_ANDROID)
 
-#ifndef GPAC_ANDROID
-#define GPAC_ANDROID
-#endif
-
 #define GPAC_HAS_IPV6
 #define GPAC_USE_GLES1X
 /*don't use fixed-point version on Android, not needed*/
 //#define GPAC_FIXED_POINT
 
-#define GPAC_HAS_SPIDERMONKEY
+#define GPAC_HAS_QJS
 #define GPAC_HAS_JPEG
 #define GPAC_HAS_PNG
+#define GPAC_HAS_HTTP2
+#define GPAC_HAS_IFADDRS
+#define GPAC_HAS_LIBCAPTION
+#define GPAC_HAS_MPEGHDECODER
 
 /*Configuration for XCode OSX (not iOS) */
-#elif defined(GPAC_CONFIG_DARWIN) && !defined(GPAC_IPHONE)
+#elif defined(GPAC_CONFIG_DARWIN) && !defined(GPAC_CONFIG_IOS)
 
 #define GPAC_HAS_IPV6
+//#if !defined(__arm64__)
 #define GPAC_HAS_SSL
+//#endif
+#define GPAC_HAS_SOCK_UN
+
+#define GPAC_HAS_FD
+#define GPAC_HAS_IFADDRS
 
 //64-bits OSX
 #ifdef __LP64__
+/*! macro defined for 64-bits platforms*/
 #define GPAC_64_BITS
 #endif
 
-#define GPAC_HAS_SPIDERMONKEY
+#define GPAC_HAS_QJS
+//#define GPAC_DISABLE_QJS_LIBC
 #define GPAC_HAS_JPEG
 #define GPAC_HAS_PNG
 #define GPAC_HAS_GLU
+#define GPAC_HAS_VTB
+#define GPAC_HAS_HTTP2
+#define GPAC_HAS_POLL
+#define GPAC_HAS_LIBCACA
+
+#define GPAC_HAS_NGTCP2
 
 #define GPAC_MEMORY_TRACKING
+
+#define GPAC_HAS_LIBCAPTION
+#define GPAC_HAS_MPEGHDECODER
+
 /*Configuration for XCode iOS*/
-#elif defined(GPAC_CONFIG_DARWIN) && defined(GPAC_IPHONE)
+#elif defined(GPAC_CONFIG_DARWIN) && defined(GPAC_CONFIG_IOS)
 
 //64-bits iOS
 #ifdef __LP64__
+/*! macro defined for 64-bits platforms*/
 #define GPAC_64_BITS
 #endif
 
-#define GPAC_HAS_SPIDERMONKEY
+#define GPAC_HAS_QJS
 #define GPAC_HAS_JPEG
 #define GPAC_HAS_PNG
+#define GPAC_HAS_SOCK_UN
+#define GPAC_HAS_IFADDRS
 
 /*don't use fixed-point version on iOS, not needed*/
 //#define GPAC_FIXED_POINT
@@ -146,7 +208,14 @@
 
 #define GPAC_HAS_IPV6
 #define GPAC_HAS_SSL
-
+#define GPAC_DISABLE_OGG
+#define GPAC_HAS_STRLCPY
+#define GPAC_HAS_STRLCAT
+#define GPAC_HAS_VTB
+#define GPAC_HAS_HTTP2
+#define GPAC_HAS_POLL
+#define GPAC_HAS_LIBCAPTION
+#define GPAC_HAS_MPEGHDECODER
 
 /*Configuration for Symbian*/
 #elif defined(__SYMBIAN32__)
@@ -155,7 +224,7 @@
 #define GPAC_FIXED_POINT
 #endif
 
-#define GPAC_HAS_SPIDERMONKEY
+#define GPAC_HAS_QJS
 #define GPAC_HAS_JPEG
 #define GPAC_HAS_PNG
 
@@ -164,14 +233,14 @@
 #endif
 
 
+#define GPAC_SCHED_DEFAULT "free"
+
+
 /*disables player */
-//#define GPAC_DISABLE_PLAYER
+//#define GPAC_DISABLE_COMPOSITOR
 
 /*disables scene manager */
 //#define GPAC_DISABLE_SMGR
-
-/*disables core tools */
-//#define GPAC_DISABLE_CORE_TOOLS
 
 /*disables zlib */
 #ifndef GPAC_MP4BOX_MINI
@@ -179,6 +248,9 @@
 #else
 #define GPAC_DISABLE_ZLIB
 #endif
+
+/*disables QuickJS libc*/
+//#define GPAC_DISABLE_QJS_LIBC
 
 /*disables SVG scene graph*/
 //#define GPAC_DISABLE_SVG
@@ -189,7 +261,8 @@
 /*disables X3D scene graphs*/
 //#define GPAC_DISABLE_X3D
 
-/*disables MPEG-4 OD Framework - this only minimalize the set of OD features used, however all cannot be removed*/
+/*disables MPEG-4 OD Framework - this only minimalize the set of OD features used, however all cannot be removed
+this macro is currently defined in setup.h */
 //#define GPAC_MINIMAL_ODF
 
 /*disables BIFS coding*/
@@ -199,7 +272,7 @@
 //#define GPAC_DISABLE_LASER
 //#define GPAC_DISABLE_SAF
 
-/*disables BIFS Engine support - TODO - merge DIMS and LASeR into BENG and rename it*/
+/*disables BIFS Engine support*/
 //#define GPAC_DISABLE_SENG
 
 /*disables Cubic QTVR importing*/
@@ -247,8 +320,8 @@
 /*disables XMTA/X3D -> scene decoder*/
 //#define GPAC_DISABLE_LOADER_XMT
 
-/*disables mcrypt*/
-//#define GPAC_DISABLE_MCRYPT
+/*disables crypto tools*/
+//#define GPAC_DISABLE_CRYPTO
 
 /*disables all ISO FF*/
 //#define GPAC_DISABLE_ISOM
@@ -277,9 +350,6 @@
 /*disables IETF RTP/SDP/RTSP*/
 //#define GPAC_DISABLE_STREAMING
 
-/*disables dashclient */
-//#define GPAC_DISABLE_DASH_CLIENT
-
 /*disables Timed Text support */
 //#define GPAC_DISABLE_TTXT
 
@@ -292,12 +362,9 @@
 /*disables DASH MPD */
 //#define GPAC_DISABLE_MPD
 
-/*disables HEVC */
-//#define GPAC_DISABLE_HEVC
-
 /*disables VOBSUB */
 //#define GPAC_DISABLE_VOBSUB
 
+/*! @} */
 
 #endif		/*_GF_CONFIG_H_*/
-

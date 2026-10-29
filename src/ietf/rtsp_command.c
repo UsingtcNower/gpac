@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2026
  *					All rights reserved
  *
  *  This file is part of GPAC / IETF RTP/RTSP/SDP sub-project
@@ -29,6 +29,7 @@
 #ifndef GPAC_DISABLE_STREAMING
 
 #include <gpac/token.h>
+#include <gpac/base_coding.h>
 
 GF_EXPORT
 GF_RTSPCommand *gf_rtsp_command_new()
@@ -48,8 +49,6 @@ GF_RTSPCommand *gf_rtsp_command_new()
 GF_EXPORT
 void gf_rtsp_command_reset(GF_RTSPCommand *com)
 {
-	GF_RTSPTransport *trans;
-	GF_X_Attribute *att;
 	if (!com) return;
 
 	//free all headers
@@ -83,12 +82,12 @@ void gf_rtsp_command_reset(GF_RTSPCommand *com)
 	com->Range = NULL;
 
 	while (gf_list_count(com->Transports)) {
-		trans = (GF_RTSPTransport *) gf_list_get(com->Transports, 0);
+		GF_RTSPTransport *trans = (GF_RTSPTransport *) gf_list_get(com->Transports, 0);
 		gf_list_rem(com->Transports, 0);
 		gf_rtsp_transport_del(trans);
 	}
 	while (gf_list_count(com->Xtensions)) {
-		att = (GF_X_Attribute*)gf_list_get(com->Xtensions, 0);
+		GF_X_Attribute *att = (GF_X_Attribute*)gf_list_get(com->Xtensions, 0);
 		gf_list_rem(com->Xtensions, 0);
 		gf_free(att->Name);
 		gf_free(att->Value);
@@ -111,9 +110,7 @@ GF_Err RTSP_WriteCommand(GF_RTSPSession *sess, GF_RTSPCommand *com, unsigned cha
                          unsigned char **out_buffer, u32 *out_size)
 {
 	u32 i, cur_pos, size, count;
-	char *buffer, temp[50];
-	GF_RTSPTransport *trans;
-	GF_X_Attribute *att;
+	char *buffer;
 
 	*out_buffer = NULL;
 
@@ -186,6 +183,7 @@ GF_Err RTSP_WriteCommand(GF_RTSPSession *sess, GF_RTSPCommand *com, unsigned cha
 	if (count) {
 		RTSP_WRITE_ALLOC_STR(buffer, size, cur_pos, "Transport: ");
 		for (i=0; i<count; i++) {
+			GF_RTSPTransport *trans;
 			//line separator for headers
 			if (i) RTSP_WRITE_ALLOC_STR(buffer, size, cur_pos, "\r\n ,");
 			trans = (GF_RTSPTransport *) gf_list_get(com->Transports, i);
@@ -238,7 +236,7 @@ GF_Err RTSP_WriteCommand(GF_RTSPSession *sess, GF_RTSPCommand *com, unsigned cha
 			}
 			if (trans->SSRC) {
 				RTSP_WRITE_ALLOC_STR(buffer, size, cur_pos, ";ssrc=");
-				RTSP_WRITE_INT(buffer, size, cur_pos, trans->SSRC, 0);
+				RTSP_WRITE_HEX(buffer, size, cur_pos, trans->SSRC, 0);
 			}
 		}
 		//done with transport
@@ -249,7 +247,7 @@ GF_Err RTSP_WriteCommand(GF_RTSPSession *sess, GF_RTSPCommand *com, unsigned cha
 	//eXtensions
 	count = gf_list_count(com->Xtensions);
 	for (i=0; i<count; i++) {
-		att = (GF_X_Attribute *) gf_list_get(com->Xtensions, i);
+		GF_X_Attribute *att = (GF_X_Attribute *) gf_list_get(com->Xtensions, i);
 		RTSP_WRITE_ALLOC_STR(buffer, size, cur_pos, "x-");
 		RTSP_WRITE_HEADER(buffer, size, cur_pos, att->Name, att->Value);
 	}
@@ -269,7 +267,7 @@ GF_Err RTSP_WriteCommand(GF_RTSPSession *sess, GF_RTSPCommand *com, unsigned cha
 
 //format a DESCRIBE, SETUP, PLAY or PAUSE on a session
 //YOUR COMMAND MUST BE FORMATTED ACCORDINGLY
-//sCtrl contains a control string if needed, formating the REQUEST as server_url/service_name/sCtrl
+//sCtrl contains a control string if needed, formatting the REQUEST as server_url/service_name/sCtrl
 GF_EXPORT
 GF_Err gf_rtsp_send_command(GF_RTSPSession *sess, GF_RTSPCommand *com)
 {
@@ -292,7 +290,7 @@ GF_Err gf_rtsp_send_command(GF_RTSPSession *sess, GF_RTSPCommand *com)
 	        && strcmp(com->method, GF_RTSP_PLAY)
 	        && strcmp(com->method, GF_RTSP_PAUSE)
 	        && strcmp(com->method, GF_RTSP_RECORD)
-	        && strcmp(com->method, GF_RTSP_REDIRECTE)
+	        && strcmp(com->method, GF_RTSP_REDIRECT)
 	        && strcmp(com->method, GF_RTSP_TEARDOWN)
 	        && strcmp(com->method, GF_RTSP_OPTIONS)
 
@@ -322,33 +320,24 @@ GF_Err gf_rtsp_send_command(GF_RTSPSession *sess, GF_RTSPCommand *com)
 
 
 	//update sequence number
-	sess->CSeq += 1;
-	sess->NbPending += 1;
+	if (!com->is_resend) {
+		sess->CSeq += 1;
+		sess->NbPending += 1;
+		com->is_resend = GF_FALSE;
+	}
 
 	if (!strcmp(com->method, GF_RTSP_OPTIONS)) {
-		sprintf(buffer, "OPTIONS %s %s\r\n", sCtrl, GF_RTSP_VERSION);
+		snprintf(buffer, 1024, "OPTIONS %s %s\r\n", sCtrl, GF_RTSP_VERSION);
 	} else {
 		rad = (sess->ConnectionType == GF_SOCK_TYPE_TCP) ? "rtsp" : "rtspu";
 		if (sCtrl) {
-			//if both server and service names are included in the control, just
-			//use the control
-			if (strstr(sCtrl, sess->Server) && strstr(sCtrl, sess->Service)) {
-				sprintf(buffer, "%s %s %s\r\n", com->method, sCtrl, GF_RTSP_VERSION);
-			}
-			//if service is specified in ctrl, do not rewrite it
-			else if (strstr(sCtrl, sess->Service)) {
-				sprintf(buffer, "%s %s://%s:%d/%s %s\r\n", com->method, rad, sess->Server, sess->Port, sCtrl, GF_RTSP_VERSION);
-			}
-			else if (!strnicmp(sCtrl, "rtsp", 4)) {
-				sprintf(buffer, "%s %s %s\r\n", com->method, sCtrl, GF_RTSP_VERSION);
-			}
-			//otherwise rewrite full URL
-			else {
-				sprintf(buffer, "%s %s://%s/%s/%s %s\r\n", com->method, rad, sess->Server, sess->Service, sCtrl, GF_RTSP_VERSION);
-//				sprintf(buffer, "%s %s://%s:%d/%s/%s %s\r\n", com->method, rad, sess->Server, sess->Port, sess->Service, sCtrl, GF_RTSP_VERSION);
-			}
+			char szServURL[1024];
+			sprintf(szServURL, "%s://%s:%d/%s", rad, sess->Server, sess->Port, sess->Service);
+			char *ctrl_url = gf_url_concatenate(szServURL, sCtrl);
+			snprintf(buffer, 1024, "%s %s %s\r\n", com->method, ctrl_url, GF_RTSP_VERSION);
+			gf_free(ctrl_url);
 		} else {
-			sprintf(buffer, "%s %s://%s:%d/%s %s\r\n", com->method, rad, sess->Server, sess->Port, sess->Service, GF_RTSP_VERSION);
+			snprintf(buffer, 1024, "%s %s://%s:%d/%s %s\r\n", com->method, rad, sess->Server, sess->Port, sess->Service, GF_RTSP_VERSION);
 		}
 	}
 
@@ -376,7 +365,8 @@ GF_Err gf_rtsp_send_command(GF_RTSPSession *sess, GF_RTSPCommand *com)
 
 	//send buffer
 	e = gf_rtsp_send_data(sess, result, size);
-	if (e) goto exit;
+	if (e)
+		goto exit;
 
 
 	//update our state
@@ -386,7 +376,7 @@ GF_Err gf_rtsp_send_command(GF_RTSPSession *sess, GF_RTSPCommand *com)
 	else sess->RTSP_State = GF_RTSP_STATE_WAITING;
 	//teardown invalidates the session most of the time, so we force the user to wait for the reply
 	//as the reply may indicate a connection-closed
-	strcpy(sess->RTSPLastRequest, com->method);
+	gf_strcpy(sess->RTSPLastRequest, com->method);
 
 exit:
 	if (result) gf_free(result);
@@ -418,7 +408,8 @@ void gf_rtsp_set_command_value(GF_RTSPCommand *com, char *Header, char *Value)
 	else if (!stricmp(Header, "Range")) com->Range = gf_rtsp_range_parse(Value);
 	else if (!stricmp(Header, "Referer")) com->Referer = gf_strdup(Value);
 	else if (!stricmp(Header, "Scale")) sscanf(Value, "%lf", &com->Scale);
-	else if (!stricmp(Header, "Session")) com->Session = gf_strdup(Value);
+	else if (!stricmp(Header, "Session"))
+		com->Session = gf_strdup(Value);
 	else if (!stricmp(Header, "Speed")) sscanf(Value, "%lf", &com->Speed);
 	else if (!stricmp(Header, "User_Agent")) com->User_Agent = gf_strdup(Value);
 	//Transports
@@ -451,7 +442,7 @@ GF_Err RTSP_ParseCommandHeader(GF_RTSPSession *sess, GF_RTSPCommand *com, u32 Bo
 	u32 Size;
 
 	Size = sess->CurrentSize - sess->CurrentPos;
-	buffer = sess->TCPBuffer + sess->CurrentPos;
+	buffer = sess->tcp_buffer + sess->CurrentPos;
 
 	//by default the command is wrong ;)
 	com->StatusCode = NC_RTSP_Bad_Request;
@@ -471,7 +462,7 @@ GF_Err RTSP_ParseCommandHeader(GF_RTSPSession *sess, GF_RTSPCommand *com, u32 Bo
 	com->service_name = gf_strdup(ValBuf);
 
 	//RTSP version
-	Pos = gf_token_get(LineBuffer, Pos, "\t\r\n", ValBuf, 1024);
+	Pos = gf_token_get(LineBuffer, Pos, " \t\r\n", ValBuf, 1024);
 	if (Pos <= 0) return GF_OK;
 	if (strcmp(ValBuf, GF_RTSP_VERSION)) {
 		com->StatusCode = NC_RTSP_RTSP_Version_Not_Supported;
@@ -483,12 +474,27 @@ GF_Err RTSP_ParseCommandHeader(GF_RTSPSession *sess, GF_RTSPCommand *com, u32 Bo
 	return gf_rtsp_parse_header(buffer + ret, Size - ret, BodyStart, com, NULL);
 }
 
+char *RTSP_DEFINED_METHODS[] =
+{
+	GF_RTSP_DESCRIBE,
+	GF_RTSP_SETUP,
+	GF_RTSP_PLAY,
+	GF_RTSP_PAUSE,
+	GF_RTSP_RECORD,
+	GF_RTSP_TEARDOWN,
+	GF_RTSP_GET_PARAMETER,
+	GF_RTSP_SET_PARAMETER,
+	GF_RTSP_OPTIONS,
+	GF_RTSP_ANNOUNCE,
+	GF_RTSP_REDIRECT,
+	NULL
+};
 
 GF_EXPORT
 GF_Err gf_rtsp_get_command(GF_RTSPSession *sess, GF_RTSPCommand *com)
 {
 	GF_Err e;
-	u32 BodyStart, size;
+	u32 BodyStart, size, com_buf_size;
 	if (!sess || !com) return GF_BAD_PARAM;
 
 	//reset the command
@@ -497,32 +503,93 @@ GF_Err gf_rtsp_get_command(GF_RTSPSession *sess, GF_RTSPCommand *com)
 	if (!sess->connection) return GF_IP_CONNECTION_CLOSED;
 
 	//lock
-	gf_mx_p(sess->mx);
-
 	//fill TCP buffer
 	e = gf_rtsp_fill_buffer(sess);
 	if (e) goto exit;
 	//this is upcoming, interleaved data
-	if (strncmp(sess->TCPBuffer+sess->CurrentPos, "RTSP", 4)) {
-		e = GF_IP_NETWORK_EMPTY;
-		goto exit;
+	if (sess->TCPChannels && sess->interleaved) {
+		u32 i=0;
+		Bool sync = GF_FALSE;
+		while (RTSP_DEFINED_METHODS[i]) {
+			if (!strncmp(sess->tcp_buffer+sess->CurrentPos, RTSP_DEFINED_METHODS[i], strlen(RTSP_DEFINED_METHODS[i]) ) ) {
+				sync = GF_TRUE;
+				break;
+			}
+		}
+		if (!sync) {
+			e = GF_IP_NETWORK_EMPTY;
+			goto exit;
+		}
 	}
 	e = gf_rtsp_read_reply(sess);
 	if (e) goto exit;
 
-	gf_rtsp_get_body_info(sess, &BodyStart, &size);
+	gf_rtsp_get_body_info(sess, &BodyStart, &size, GF_FALSE);
+	com_buf_size=0;
+	if (sess->tunnel_mode==RTSP_HTTP_SERVER) {
+		//no body start, this means no '=' at the end of the base64 string, assume we got the entire message
+		if (!BodyStart) BodyStart = sess->CurrentSize - sess->CurrentPos;
+		com_buf_size = BodyStart;
+		u32 dsize = gf_base64_decode(sess->tcp_buffer+sess->CurrentPos, BodyStart, sess->tcp_buffer+sess->CurrentPos, BodyStart);
+		sess->tcp_buffer[sess->CurrentPos + dsize] = 0;
+		gf_rtsp_get_body_info(sess, &BodyStart, &size, GF_TRUE);
+	}
+
+	GF_LOG(GF_LOG_INFO, GF_LOG_RTP, ("[RTSP] Got Command:\n%s\n", sess->tcp_buffer+sess->CurrentPos));
+
 	e = RTSP_ParseCommandHeader(sess, com, BodyStart);
 	//before returning an error we MUST reset the TCP buffer
 
 	//copy the body if any
 	if (!e && com->Content_Length) {
+		u32 rsp_size = sess->CurrentSize - sess->CurrentPos;
+		if (rsp_size < com->Content_Length) {
+			GF_LOG(GF_LOG_ERROR, GF_LOG_RTP, ("[RTSP] Invalid content length %u - Response was: \n%s\n", com->Content_Length, sess->tcp_buffer+sess->CurrentPos));
+			e = GF_NON_COMPLIANT_BITSTREAM;
+			goto exit;
+		}
 		com->body = (char *) gf_malloc(sizeof(char) * (com->Content_Length));
-		memcpy(com->body, sess->TCPBuffer+sess->CurrentPos + BodyStart, com->Content_Length);
+		memcpy(com->body, sess->tcp_buffer+sess->CurrentPos + BodyStart, com->Content_Length);
 	}
 	//reset TCP buffer
-	sess->CurrentPos += BodyStart + com->Content_Length;
+	if (!com_buf_size) com_buf_size = BodyStart + com->Content_Length;
+	sess->CurrentPos += com_buf_size;
 
-	if (!com->CSeq) com->StatusCode = NC_RTSP_Bad_Request;
+	if (!sess->CSeq && !sess->HTTP_Cookie //first request , cookie not set
+		&& (sess->tunnel_mode!=RTSP_HTTP_DISABLE) //not disabled
+		&& (!strncmp(sess->tcp_buffer, "GET ", 4) || !strncmp(sess->tcp_buffer, "POST ", 5))
+	) {
+		char *sess_cookie = strstr(sess->tcp_buffer, "x-sessioncookie");
+		if (sess_cookie) sess_cookie = strchr(sess_cookie, ':');
+		if (sess_cookie) {
+			while (sess_cookie[0] && strchr(" :", sess_cookie[0]))
+				sess_cookie++;
+			char *sep = strchr(sess_cookie, '\r');
+			if (sep) {
+				sep[0] = 0;
+				sess->HTTP_Cookie = gf_strdup(sess_cookie);
+				sep[0] = '\r';
+
+				if (!strncmp(sess->tcp_buffer, "GET ", 4)) {
+					char szCom[501];
+					snprintf(szCom, 500, "HTTP/1.0 200 OK\r\nServer: %s\r\nCache-Control: no-store\r\nPragma: no-cache\r\nContent-Type: application/x-rtsp-tunnelled\r\n\r\n", sess->Server);
+					szCom[500] = 0;
+
+					GF_LOG(GF_LOG_INFO, GF_LOG_RTP, ("[RTSPTunnel] Send reply %s\n", szCom));
+
+					e = gf_rtsp_send_data(sess, szCom, (u32) strlen(szCom));
+					if (e && (e!= GF_IP_NETWORK_EMPTY)) return e;
+					return GF_IP_NETWORK_EMPTY;
+				}
+				//post
+				return GF_RTSP_TUNNEL_POST;
+			}
+		}
+	}
+
+
+	if (!com->CSeq)
+		com->StatusCode = NC_RTSP_Bad_Request;
 
 	if (e || (com->StatusCode != NC_RTSP_OK)) goto exit;
 
@@ -558,14 +625,13 @@ GF_Err gf_rtsp_get_command(GF_RTSPSession *sess, GF_RTSPCommand *com)
 		sess->connection = NULL;
 
 		//destroy the http tunnel if any
-		if (sess->HasTunnel && sess->http) {
+		if (sess->http) {
 			gf_sk_del(sess->http);
 			sess->http = NULL;
 		}
 	}
 
 exit:
-	gf_mx_v(sess->mx);
 	return e;
 }
 

@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / common tools sub-project
@@ -25,6 +25,8 @@
 
 
 #include <gpac/path2d.h>
+
+#if !defined(GPAC_DISABLE_EVG) || defined(GPAC_HAS_FREETYPE)
 
 GF_EXPORT
 GF_Path *gf_path_new()
@@ -99,7 +101,7 @@ void gf_path_del(GF_Path *gp)
 
 #define GF_2D_REALLOC(_gp)	\
 	if (_gp->n_alloc_points < _gp->n_points+3) {	\
-		_gp->n_alloc_points = (_gp->n_alloc_points<5) ? 10 : (_gp->n_alloc_points*3/2);	\
+		_gp->n_alloc_points = (_gp->n_alloc_points<5) ? 10 : (_gp->n_alloc_points*2);	\
 		_gp->points = (GF_Point2D *)gf_realloc(_gp->points, sizeof(GF_Point2D)*(_gp->n_alloc_points));	\
 		_gp->tags = (u8 *) gf_realloc(_gp->tags, sizeof(u8)*(_gp->n_alloc_points));	\
 	}	\
@@ -164,7 +166,6 @@ GF_Err gf_path_add_line_to_vec(GF_Path *gp, GF_Point2D *pt) {
 GF_EXPORT
 GF_Err gf_path_close(GF_Path *gp)
 {
-	Fixed diff;
 	GF_Point2D start, end;
 	if (!gp || !gp->n_contours) return GF_BAD_PARAM;
 
@@ -173,8 +174,7 @@ GF_Err gf_path_close(GF_Path *gp)
 	end = gp->points[gp->n_points-1];
 	end.x -= start.x;
 	end.y -= start.y;
-	diff = gf_mulfix(end.x, end.x) + gf_mulfix(end.y, end.y);
-	if (ABS(diff) > FIX_ONE/1000) {
+	if (FIX_ONE/100 < ABS(end.x) || FIX_ONE/100 < ABS(end.y)) {
 		GF_Err e = gf_path_add_line_to(gp, start.x, start.y);
 		if (e) return e;
 	}
@@ -304,14 +304,16 @@ GF_Err gf_path_add_subpath(GF_Path *gp, GF_Path *src, GF_Matrix2D *mx)
 	if (!gp->points) return GF_OUT_OF_MEM;
 	gp->tags = (u8*)gf_realloc(gp->tags, sizeof(u8)*gp->n_alloc_points);
 	if (!gp->tags) return GF_OUT_OF_MEM;
-	memcpy(gp->points + gp->n_points, src->points, sizeof(GF_Point2D)*src->n_points);
-	if (mx) {
-		for (i=0; i<src->n_points; i++) {
-			gf_mx2d_apply_coords(mx, &gp->points[i+gp->n_points].x, &gp->points[i+gp->n_points].y);
+	if (src->n_points) {
+		memcpy(gp->points + gp->n_points, src->points, sizeof(GF_Point2D)*src->n_points);
+		if (mx) {
+			for (i=0; i<src->n_points; i++) {
+				gf_mx2d_apply_coords(mx, &gp->points[i+gp->n_points].x, &gp->points[i+gp->n_points].y);
+			}
 		}
+		memcpy(gp->tags + gp->n_points, src->tags, sizeof(u8)*src->n_points);
+		gp->n_points += src->n_points;
 	}
-	memcpy(gp->tags + gp->n_points, src->tags, sizeof(u8)*src->n_points);
-	gp->n_points += src->n_points;
 	gf_rect_union(&gp->bbox, &src->bbox);
 	if (!(src->flags & GF_PATH_FLATTENED)) gp->flags &= ~GF_PATH_FLATTENED;
 	if (src->flags & GF_PATH_BBOX_DIRTY) gp->flags |= GF_PATH_BBOX_DIRTY;
@@ -488,7 +490,7 @@ GF_Err gf_path_add_svg_arc_to(GF_Path *gp, Fixed end_x, Fixed end_y, Fixed r_x, 
 
 	rxsq = gf_mulfix(r_x, r_x);
 	rysq = gf_mulfix(r_y, r_y);
-	assert(rxsq && rxsq);
+	gf_assert(rxsq && rysq);
 
 	radius_scale = gf_divfix(xmidpsq, rxsq) + gf_divfix(ymidpsq, rysq);
 	if (radius_scale > FIX_ONE) {
@@ -578,7 +580,7 @@ GF_Err gf_path_add_svg_arc_to(GF_Path *gp, Fixed end_x, Fixed end_y, Fixed r_x, 
 }
 
 GF_EXPORT
-GF_Err gf_path_add_arc(GF_Path *gp, Fixed radius, Fixed start_angle, Fixed end_angle, u32 close_type)
+GF_Err gf_path_add_arc(GF_Path *gp, Fixed radius, Fixed start_angle, Fixed end_angle, GF_Path2DArcCloseType close_type)
 {
 	GF_Err e;
 	Fixed _vx, _vy, step, cur;
@@ -589,7 +591,7 @@ GF_Err gf_path_add_arc(GF_Path *gp, Fixed radius, Fixed start_angle, Fixed end_a
 
 	/*pie*/
 	i=0;
-	if (close_type==2) {
+	if (close_type==GF_PATH2D_ARC_PIE) {
 		gf_path_add_move_to(gp, 0, 0);
 		i=1;
 	}
@@ -611,7 +613,7 @@ GF_Err gf_path_add_arc(GF_Path *gp, Fixed radius, Fixed start_angle, Fixed end_a
 		if (e) return e;
 		cur+=step;
 	}
-	if (close_type) e = gf_path_close(gp);
+	if (close_type!=GF_PATH2D_ARC_OPEN) e = gf_path_close(gp);
 	return e;
 }
 
@@ -762,7 +764,7 @@ GF_EXPORT
 GF_Err gf_path_get_bounds(GF_Path *gp, GF_Rect *rc)
 {
 	u32 i;
-	GF_Point2D *pt, *end, *ctrl1, *ctrl2;
+	GF_Point2D *pt, *end;
 	Fixed xMin, xMax, yMin, yMax, cxMin, cxMax, cyMin, cyMax;
 	if (!gp || !rc) return GF_BAD_PARAM;
 
@@ -810,6 +812,7 @@ GF_Err gf_path_get_bounds(GF_Path *gp, GF_Rect *rc)
 
 	/*control box is bigger than box , decompose curves*/
 	if ((cxMin < xMin) || (cxMax > xMax) || (cyMin < yMin) || (cyMax > yMax)) {
+		GF_Point2D *ctrl1, *ctrl2;
 		/*decompose all control points*/
 		pt = gp->points;
 		for (i=1 ; i < gp->n_points; ) {
@@ -997,6 +1000,7 @@ GF_EXPORT
 void gf_path_flatten(GF_Path *gp)
 {
 	GF_Path *res;
+	u32 flags = gp->flags;
 	if (gp->flags & GF_PATH_FLATTENED) return;
 	if (!gp->n_points) return;
 	res = gf_path_get_flatten(gp);
@@ -1004,6 +1008,7 @@ void gf_path_flatten(GF_Path *gp)
 	if (gp->points) gf_free(gp->points);
 	if (gp->tags) gf_free(gp->tags);
 	memcpy(gp, res, sizeof(GF_Path));
+	gp->flags |= (flags & (GF_PATH_FILL_ZERO_NONZERO|GF_PATH_FILL_EVEN));
 	gf_free(res);
 }
 
@@ -1067,9 +1072,11 @@ Bool gf_path_point_over(GF_Path *gp, Fixed x, Fixed y)
 	s32 wn;
 	GF_Point2D start, s, e, pt;
 	GF_Rect rc;
+	GF_Err err;
 
 	/*check if not in bounds*/
-	gf_path_get_bounds(gp, &rc);
+	err = gf_path_get_bounds(gp, &rc);
+	if (err) return GF_FALSE;
 	if ((x<rc.x) || (y>rc.y) || (x>rc.x+rc.width) || (y<rc.y-rc.height)) return GF_FALSE;
 
 	if (!gp || (gp->n_points<2)) return GF_FALSE;
@@ -1138,7 +1145,7 @@ Bool gf_path_point_over(GF_Path *gp, Fixed x, Fixed y)
 		}
 	}
 	if (gp->flags & GF_PATH_FILL_ZERO_NONZERO) return wn ? GF_TRUE : GF_FALSE;
-	return wn%2 ? GF_TRUE : GF_FALSE;
+	return (wn%2) ? GF_TRUE : GF_FALSE;
 }
 
 GF_EXPORT
@@ -1354,8 +1361,9 @@ u32 gf_polygone2d_get_convexity(GF_Point2D *pts, u32 len)
 	pThird = pts[0];
 	dcur.x = pThird.x - pSecond.x;
 	dcur.y = pThird.y - pSecond.y;
-	if ( ConvexCompare(dcur) ) ConvexCheckTriple;
-
+	if ( ConvexCompare(dcur) ) {
+		ConvexCheckTriple;
+	}
 	/* and check for direction changes back to second vertex */
 	dcur.x = pSaveSecond.x - pSecond.x;
 	dcur.y = pSaveSecond.y - pSecond.y;
@@ -1368,3 +1376,5 @@ u32 gf_polygone2d_get_convexity(GF_Point2D *pts, u32 len)
 	if ( angleSign < 0 ) return GF_POLYGON_CONVEX_CW;
 	return GF_POLYGON_CONVEX_LINE;
 }
+
+#endif // !defined(GPAC_DISABLE_EVG) || defined(GPAC_HAS_FREETYPE)

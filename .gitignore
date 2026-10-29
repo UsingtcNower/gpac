@@ -1,8 +1,10 @@
+
 *.o
 *.suo
 *.user
 *.userosscache
 *.sln.docstates
+.vscode
 *.userprefs
 *_i.c
 *_p.c
@@ -47,11 +49,14 @@
 [Rr]eleases/
 x64/
 x86/
-build/
 bld/
 [Bb]in/
 [Oo]bj/
-
+__pycache__/
+*.py[cod]
+share/python/build/
+*egg-info
+ 
 
 .DS_Store .AppleDouble .LSOverride
 
@@ -60,12 +65,12 @@ bld/
 *.so
 *.dylib
 *.dll
-*.lai 
-*.la 
-*.a 
+*.lai
+*.la
+*.a
 *.lib
-*.exe 
-*.out 
+*.exe
+*.out
 *.app
 *.apk
 *.dmg
@@ -74,17 +79,26 @@ bld/
 
 .depend
 .deps/
+.dep
 
-#GPAC specific 
+#GPAC specific
 config.h
 include/gpac/revision.h
 include/gpac/revision.h.new
-extra_lib/lib/
-extra_lib/include/SDL/
-extra_lib/include/ios/
+extra_lib/
 config.mak
 configure-stamp
 gpac.pc
 tests/external_media/
 tests/results/
+tests/hash_refs/
 
+src/modules/**/*.dep
+*doxygen_warnings.txt
+*/nodejs/node_modules/
+*/nodejs/package-lock.json
+applications/deprecated/
+
+
+# nix output
+result

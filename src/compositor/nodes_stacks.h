@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -81,7 +81,7 @@ void Bindable_SetSetBind(GF_Node *bindable, Bool val);
 
 /*special user-modif of viewport/viewpoint:
  if stack is not NULL, binding is only performed in this stack
- otherwise,  binding is performed on all stack*/
+ otherwise, binding is performed on all stack*/
 void Bindable_SetSetBindEx(GF_Node *bindable, Bool val, GF_List *stack);
 
 
@@ -201,6 +201,7 @@ Bool compositor_compositetexture_handle_event(GF_Compositor *compositor, GF_Node
 void compositor_compositetexture_sensor_delete(GF_Node *composite_appear, GF_SensorHandler *hdl);
 
 void compositor_init_text(GF_Compositor *compositor, GF_Node *node);
+M_FontStyle *compositor_get_font_style(GF_Node *font_style);
 
 #ifndef GPAC_DISABLE_3D
 
@@ -270,13 +271,13 @@ GF_TextureHandler *gf_sc_hardcoded_proto_get_texture_handler(GF_Node *n);
 void compositor_extrude_text(GF_Node *node, GF_TraverseState *tr_state, GF_Mesh *mesh, MFVec3f *thespine, Fixed creaseAngle, Bool begin_cap, Bool end_cap, MFRotation *spine_ori, MFVec2f *spine_scale, Bool txAlongSpine);
 #endif
 
-void compositor_init_texture_text(GF_Compositor *compositor, GF_Node *node);
-
 void compositor_init_envtest(GF_Compositor *compositor, GF_Node *node);
 void compositor_envtest_modified(GF_Node *node);
 void compositor_evaluate_envtests(GF_Compositor *compositor, u32 param_type);
 
+#ifdef GPAC_ENABLE_FLASHSHAPE
 void compositor_init_hc_flashshape(GF_Compositor *compositor, GF_Node *node);
+#endif
 
 #endif /*GPAC_DISABLE_VRML*/
 
@@ -284,6 +285,7 @@ void compositor_init_hc_flashshape(GF_Compositor *compositor, GF_Node *node);
 #ifndef GPAC_DISABLE_SVG
 void compositor_init_svg_svg(GF_Compositor *compositor, GF_Node *node);
 void compositor_init_svg_g(GF_Compositor *compositor, GF_Node *node);
+void compositor_init_svg_defs(GF_Compositor *compositor, GF_Node *node);
 void compositor_init_svg_switch(GF_Compositor *compositor, GF_Node *node);
 void compositor_init_svg_rect(GF_Compositor *compositor, GF_Node *node);
 void compositor_init_svg_circle(GF_Compositor *compositor, GF_Node *node);
@@ -298,6 +300,7 @@ void compositor_init_svg_radialGradient(GF_Compositor *compositor, GF_Node *node
 void compositor_init_svg_solidColor(GF_Compositor *compositor, GF_Node *node);
 Bool compositor_svg_solid_color_dirty(GF_Compositor *compositor, GF_Node *node);
 void compositor_init_svg_stop(GF_Compositor *compositor, GF_Node *node);
+void compositor_init_svg_clip_path(GF_Compositor *compositor, GF_Node *node);
 
 void compositor_init_svg_image(GF_Compositor *compositor, GF_Node *node);
 void compositor_init_svg_video(GF_Compositor *compositor, GF_Node *node);
@@ -318,8 +321,11 @@ void compositor_init_svg_font_face_uri(GF_Compositor *compositor, GF_Node *node)
 
 void compositor_init_svg_updates(GF_Compositor *compositor, GF_Node *node);
 
+#ifdef GPAC_ENABLE_SVG_FILTERS
 void compositor_init_svg_filter(GF_Compositor *compositor, GF_Node *node);
 void svg_draw_filter(GF_Node *filter, GF_Node *node, GF_TraverseState *tr_state);
+#endif
+
 
 GF_TextureHandler *compositor_svg_get_gradient_texture(GF_Node *node);
 GF_TextureHandler *compositor_svg_get_image_texture(GF_Node *node);
@@ -331,9 +337,26 @@ void svg_pause_video(GF_Node *n, Bool pause);
 
 void compositor_svg_video_modified(GF_Compositor *compositor, GF_Node *node);
 
+typedef struct
+{
+	GF_TextureHandler txh;
+	Drawable *drawable;
+	MFURL txurl;
+	Bool first_frame_fetched;
+	GF_Node *audio;
+	Bool audio_dirty;
+	Bool stop_requested;
+} SVG_video_stack;
+
+typedef struct
+{
+	GF_AudioInput input;
+	Bool is_active, is_error;
+	MFURL aurl;
+} SVG_audio_stack;
+
 #endif
 
 
 
 #endif	/*NODES_STACKS_H*/
-

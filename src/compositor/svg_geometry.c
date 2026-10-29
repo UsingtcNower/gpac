@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Cyril Concolato - Jean le Feuvre
- *			Copyright (c) Telecom ParisTech 2005-2012
+ *			Copyright (c) Telecom ParisTech 2005-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -25,6 +25,8 @@
 
 #include "visual_manager.h"
 #include "nodes_stacks.h"
+
+#if !defined(GPAC_DISABLE_COMPOSITOR)
 
 #ifdef GPAC_DISABLE_SVG
 
@@ -139,9 +141,9 @@ Bool svg_drawable_is_over(Drawable *drawable, Fixed x, Fixed y, DrawAspect2D *as
 		}
 	}
 	if (check_stroke) {
-		StrikeInfo2D *si;
 		/*not painted or don't care about stroke*/
 		if ((check_stroke!=2) || asp->line_texture || asp->line_color) {
+			StrikeInfo2D *si;
 			if (glyph_rc) return 1;
 			si = drawable_get_strikeinfo(tr_state->visual->compositor, drawable, asp, tr_state->appear, NULL, 0, NULL);
 			/*point is over outline*/
@@ -357,7 +359,7 @@ static void svg_drawable_traverse(GF_Node *node, void *rs, Bool is_destroy,
 		drawable_node_del(node);
 		return;
 	}
-	assert(tr_state->traversing_mode!=TRAVERSE_DRAW_2D);
+	gf_assert(tr_state->traversing_mode!=TRAVERSE_DRAW_2D);
 
 
 	if (tr_state->traversing_mode==TRAVERSE_PICK) {
@@ -421,7 +423,7 @@ static void svg_drawable_traverse(GF_Node *node, void *rs, Bool is_destroy,
 
 			compositor_svg_apply_local_transformation(tr_state, &all_atts, &backup_matrix, &mx_3d);
 
-			ctx = drawable_init_context_svg(drawable, tr_state);
+			ctx = drawable_init_context_svg(drawable, tr_state, all_atts.clip_path);
 			if (ctx) {
 				if (is_svg_rect) {
 					if (ctx->aspect.fill_texture && ctx->aspect.fill_texture->transparent) {}
@@ -699,6 +701,6 @@ void compositor_init_svg_path(GF_Compositor *compositor, GF_Node *node)
 	gf_node_set_callback_function(node, svg_traverse_path);
 }
 
-#endif
+#endif //defined(GPAC_DISABLE_SVG)
 
-
+#endif //!defined(GPAC_DISABLE_COMPOSITOR)

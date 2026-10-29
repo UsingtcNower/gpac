@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2026
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Management sub-project
@@ -43,7 +43,6 @@ typedef struct
 
 static GF_Err s2b_insert_symbol(SWFReader *read, GF_Node *n)
 {
-	GF_Command *com;
 	GF_CommandField *f;
 
 	if (read->flags & GF_SM_SWF_STATIC_DICT) {
@@ -51,7 +50,7 @@ static GF_Err s2b_insert_symbol(SWFReader *read, GF_Node *n)
 		gf_node_list_add_child(&par->choice, n);
 		gf_node_register((GF_Node *)n, (GF_Node *)par);
 	} else {
-		com = gf_sg_command_new(read->load->scene_graph, GF_SG_INDEXED_INSERT);
+		GF_Command *com = gf_sg_command_new(read->load->scene_graph, GF_SG_INDEXED_INSERT);
 		com->node = gf_sg_find_node_by_name(read->load->scene_graph, "DICTIONARY");
 		gf_node_register(com->node, NULL);
 		f = gf_sg_command_field_new(com);
@@ -165,12 +164,10 @@ static Bool s2b_same_color(SFColor c1, SFColor c2)
 
 static GF_Node *s2b_get_appearance(SWFReader *read, GF_Node *parent, u32 fill_col, Fixed line_width, u32 l_col)
 {
-	char szDEF[1024];
 	u32 ID, i;
 	SFColor fc, lc;
 	Fixed fill_transp, line_transp;
 	M_Appearance *app;
-	M_Material2D *mat;
 
 	fc = s2b_get_color(fill_col);
 	fill_transp = FIX_ONE - s2b_get_alpha(fill_col);
@@ -181,7 +178,7 @@ static GF_Node *s2b_get_appearance(SWFReader *read, GF_Node *parent, u32 fill_co
 
 	i=0;
 	while ((app = (M_Appearance*)gf_list_enum(read->apps, &i))) {
-		mat = (M_Material2D *)app->material;
+		M_Material2D *mat = (M_Material2D *)app->material;
 		if (!line_width) {
 			if (mat->lineProps || !mat->filled) continue;
 		} else {
@@ -231,6 +228,7 @@ static GF_Node *s2b_get_appearance(SWFReader *read, GF_Node *parent, u32 fill_co
 	gf_node_register((GF_Node *)app, parent);
 
 	if (read->load->swf_import_flags & GF_SM_SWF_REUSE_APPEARANCE) {
+		char szDEF[1024];
 		sprintf(szDEF, "FILLAPP_%d", gf_list_count(read->apps));
 		read->load->ctx->max_node_id++;
 		ID = read->load->ctx->max_node_id;
@@ -310,7 +308,7 @@ static GF_Node *s2b_get_gradient(SWFReader *read, GF_Node *parent, SWFShape *sha
 		}
 		/*and remove material !!*/
 		((M_Material2D *)app->material)->filled = 0;
-		((M_Material2D *)app->material)->lineProps = s2b_new_node(read, TAG_MPEG4_LineProperties);;
+		((M_Material2D *)app->material)->lineProps = s2b_new_node(read, TAG_MPEG4_LineProperties);
 		((M_LineProperties *)((M_Material2D *)app->material)->lineProps)->width = 0;
 		gf_node_register(((M_Material2D *)app->material)->lineProps, app->material);
 	}
@@ -472,7 +470,7 @@ static GF_Node *s2b_shape_to_curve2d(SWFReader *read, SWFShape *shape, SWFShapeR
 	}
 
 
-	assert(srec->path->nbType);
+	gf_assert(srec->path->nbType);
 
 	pt_idx = 0;
 	for (i=0; i<srec->path->nbType; i++) {
@@ -635,11 +633,10 @@ static void s2b_merge_curve2d(M_Curve2D *s, M_Curve2D *tomerge)
 
 static void s2b_insert_shape(M_OrderedGroup *og, M_Shape *n, Bool is_proto)
 {
-	M_Shape *prev;
 	GF_ChildNodeItem *l = og->children;
 	if (!is_proto) {
 		while (l) {
-			prev = (M_Shape*)l->node;
+			M_Shape *prev = (M_Shape*)l->node;
 			if (prev->appearance == n->appearance) {
 				s2b_merge_curve2d( (M_Curve2D *)prev->geometry, (M_Curve2D *)n->geometry);
 				gf_node_register((GF_Node *)n, NULL);
@@ -688,7 +685,7 @@ static GF_Err swf_bifs_define_shape(SWFReader *read, SWFShape *shape, SWFFont *p
 	/*we need a grouping node*/
 	if (!read->cur_shape) {
 
-		/*empty shape - for fonts, not a mistake, that's likelly space char*/
+		/*empty shape - for fonts, not a mistake, that's likely space char*/
 		if (!shape) {
 			if (!parent_font)
 				return GF_OK;
@@ -851,7 +848,7 @@ static GF_Err swf_bifs_define_text(SWFReader *read, SWFText *text)
 		gf_node_register((GF_Node *) par, (GF_Node *)tr);
 
 		if (use_text) {
-			size_t _len;
+			u32 _len;
 			u16 *str_w, *widestr;
 			char *str;
 			void *ptr;
@@ -885,8 +882,8 @@ static GF_Err swf_bifs_define_text(SWFReader *read, SWFText *text)
 			str = (char*)gf_malloc(sizeof(char) * (gr->nbGlyphs+2));
 			widestr = str_w;
 			_len = gf_utf8_wcstombs(str, sizeof(u8) * (gr->nbGlyphs+1), (const unsigned short **) &widestr);
-			if (_len != (size_t) -1) {
-				j=(u32) _len;
+			if (_len != GF_UTF8_FAIL) {
+				j = _len;
 				str[j] = 0;
 				gf_sg_vrml_mf_reset(&t->string, GF_SG_VRML_MFSTRING);
 				gf_sg_vrml_mf_append(&t->string, GF_SG_VRML_MFSTRING, &ptr);
@@ -917,7 +914,7 @@ static GF_Err swf_bifs_define_text(SWFReader *read, SWFText *text)
 					dx += gr->dx[j];
 					continue;
 				}
-				assert((gf_node_get_tag(gl->geometry)==TAG_MPEG4_Curve2D) || (gf_node_get_tag(gl->geometry)==TAG_MPEG4_XCurve2D));
+				gf_assert((gf_node_get_tag(gl->geometry)==TAG_MPEG4_Curve2D) || (gf_node_get_tag(gl->geometry)==TAG_MPEG4_XCurve2D));
 
 				gl_par = (M_Transform2D *) s2b_new_node(read, TAG_MPEG4_Transform2D);
 				gl->appearance = s2b_get_appearance(read, (GF_Node *) gl, gr->col, 0, 0);
@@ -960,16 +957,12 @@ static void swf_nend(void *sax_cbck, const char *node_name, const char *name_spa
 }
 static void swf_ntext(void *sax_cbck, const char *content, Bool is_cdata)
 {
-	u32 len;
 	SWFFlatText *t;
-	if (!content || is_cdata) return;
+	if (!content || is_cdata || !sax_cbck) return;
 	t = (SWFFlatText *)sax_cbck;
-	len = (u32) strlen(content);
-	if (!len) return;
-	t->final = gf_realloc(t->final, sizeof(char)*(t->len+len+1));
-	t->final [t->len] = 0;
-	strcat(t->final, content);
-	t->len = (u32) strlen(t->final)+1;
+	if (!content[0]) return;
+	gf_dynstrcat(&t->final, content, NULL);
+	t->len = t->final ? ( (u32) strlen(t->final)+1 ) : 0;
 }
 
 
@@ -1023,9 +1016,9 @@ static GF_Err swf_bifs_define_edit_text(SWFReader *read, SWFEditText *text)
 		break;
 	}
 
-	strcpy(styles, "");
-	if (!text->read_only) strcat(styles, "EDITABLE");
-	if (text->password) strcat(styles, "PASSWORD");
+	gf_strcpy(styles, "");
+	if (!text->read_only) gf_strcat(styles, "EDITABLE");
+	if (text->password) gf_strcat(styles, "PASSWORD");
 
 	if (f->style.buffer) gf_free(f->style.buffer);
 	f->style.buffer = gf_strdup(styles);
@@ -1103,14 +1096,13 @@ static GF_Err swf_bifs_define_edit_text(SWFReader *read, SWFEditText *text)
 /*called upon end of sprite or clip*/
 static void swf_bifs_end_of_clip(SWFReader *read)
 {
+#if 0
 	char szDEF[1024];
 	u32 i;
 	GF_AUContext *au;
 	GF_Command *com;
 	GF_CommandField *f;
 	GF_Node *empty;
-
-	return;
 
 	empty = gf_sg_find_node_by_name(read->load->scene_graph, "Shape0");
 
@@ -1132,6 +1124,8 @@ static void swf_bifs_end_of_clip(SWFReader *read)
 
 		gf_list_insert(au->commands, com, i);
 	}
+#endif
+
 }
 
 static Bool swf_bifs_allocate_depth(SWFReader *read, u32 depth)
@@ -1163,7 +1157,7 @@ static GF_Err swf_init_od(SWFReader *read, Bool root_only)
 		esd = (GF_ESD *) gf_odf_desc_esd_new(0);
 		if (!esd) return GF_OUT_OF_MEM;
 		esd->decoderConfig->streamType = GF_STREAM_SCENE;
-		esd->decoderConfig->objectTypeIndication = GPAC_OTI_SCENE_BIFS;
+		esd->decoderConfig->objectTypeIndication = GF_CODECID_BIFS;
 		esd->slConfig->timestampResolution = read->bifs_es->timeScale;
 		esd->ESID = 1;
 		gf_list_add(read->load->ctx->root_od->ESDescriptors, esd);
@@ -1179,13 +1173,13 @@ static GF_Err swf_init_od(SWFReader *read, Bool root_only)
 	if (root_only) return GF_OK;
 
 	if (read->od_es) return GF_OK;
-	read->od_es = gf_sm_stream_new(read->load->ctx, 2, 1, 1);
+	read->od_es = gf_sm_stream_new(read->load->ctx, 2, GF_STREAM_OD, GF_CODECID_OD_V1);
 	if (!read->od_es) return GF_OUT_OF_MEM;
 
 	esd = (GF_ESD *) gf_odf_desc_esd_new(0);
 	if (!esd) return GF_OUT_OF_MEM;
 	esd->decoderConfig->streamType = GF_STREAM_OD;
-	esd->decoderConfig->objectTypeIndication = GPAC_OTI_SCENE_BIFS;
+	esd->decoderConfig->objectTypeIndication = GF_CODECID_BIFS;
 	esd->slConfig->timestampResolution = read->od_es->timeScale = read->bifs_es->timeScale;
 	esd->ESID = 2;
 	esd->OCRESID = 1;
@@ -1253,7 +1247,7 @@ static GF_Err swf_bifs_define_sprite(SWFReader *read, u32 nb_frames)
 	/*always depends on main scene*/
 	esd->dependsOnESID = 1;
 	esd->decoderConfig->streamType = GF_STREAM_SCENE;
-	esd->decoderConfig->objectTypeIndication = GPAC_OTI_SCENE_BIFS;
+	esd->decoderConfig->objectTypeIndication = GF_CODECID_BIFS;
 	esd->slConfig->timestampResolution = read->bifs_es->timeScale;
 	gf_odf_desc_del((GF_Descriptor *) esd->decoderConfig->decoderSpecificInfo);
 	esd->decoderConfig->decoderSpecificInfo = NULL;
@@ -1300,7 +1294,7 @@ static GF_Err swf_bifs_define_sprite(SWFReader *read, u32 nb_frames)
 	ID = read->load->ctx->max_node_id;
 	gf_node_set_id(n, ID, szDEF);
 	par = gf_sg_find_node_by_name(read->load->scene_graph, "DICTIONARY");
-	assert(par);
+	gf_assert(par);
 	gf_node_list_add_child(&((M_Switch *)par)->choice, n);
 	gf_node_register(n, par);
 	par = gf_sg_find_node_by_name(read->load->scene_graph, "Shape0");
@@ -1311,7 +1305,7 @@ static GF_Err swf_bifs_define_sprite(SWFReader *read, u32 nb_frames)
 	prev_sc = read->bifs_es;
 	prev_au = read->bifs_au;
 	/*create new BIFS stream*/
-	read->bifs_es = gf_sm_stream_new(read->load->ctx, esd->ESID, GF_STREAM_SCENE, 1);
+	read->bifs_es = gf_sm_stream_new(read->load->ctx, esd->ESID, GF_STREAM_SCENE, GF_CODECID_BIFS);
 	read->bifs_es->timeScale = prev_sc->timeScale;
 	read->bifs_es->imp_exp_time = prev_sc->imp_exp_time + prev_au->timing;
 
@@ -1369,8 +1363,7 @@ static GF_Err swf_bifs_setup_sound(SWFReader *read, SWFSound *snd, Bool soundstr
 		esd->OCRESID = esd->ESID;
 	} else {
 		/*soundstream runs on movie/sprite timeline*/
-		esd->OCRESID = read->bifs_es->ESID;
-		esd->OCRESID = esd->ESID;
+		esd->OCRESID = read->bifs_es ? read->bifs_es->ESID : esd->ESID;
 	}
 	gf_list_add(od->ESDescriptors, esd);
 
@@ -1421,7 +1414,6 @@ static GF_Err swf_bifs_setup_sound(SWFReader *read, SWFSound *snd, Bool soundstr
 		/*otherwise start the media at the first soundstream block*/
 		else {
 			((M_AudioClip*)n)->startTime = snd->frame_delay_ms/1000.0;
-			((M_AudioClip*)n)->startTime = 0;
 		}
 
 		sprintf(szDEF, "CLIP%d_SND", read->current_sprite_id);
@@ -1695,7 +1687,7 @@ static GF_Err swf_bifs_place_obj(SWFReader *read, u32 depth, u32 ID, u32 prev_id
 
 	if (ID==prev_id) return GF_OK;
 
-	strcpy(szDEF, gf_node_get_name(obj));
+	gf_strcpy(szDEF, gf_node_get_name(obj));
 	/*when inserting a button, trigger a pause*/
 	if (!strnicmp(szDEF, "Button", 6)) {
 		u32 i, count;
@@ -1748,8 +1740,10 @@ static GF_Err swf_bifs_show_frame(SWFReader *read)
 	u32 ts;
 	Bool is_rap;
 
-	/*hack to allow for empty BIFS AU to be encoded in order to keep the frame-rate (this reduces MP4 table size...)*/
-	if (0 && !gf_list_count(read->bifs_au->commands)) {
+	/*hack to allow for empty BIFS AU to be encoded in order to keep the frame-rate (this reduces MP4 table size...)
+	todo: make this an option - commented for now in both master and filters*/
+#if 0
+	if (!gf_list_count(read->bifs_au->commands)) {
 		GF_Command *com;
 		GF_CommandField *f;
 		com = gf_sg_command_new(read->load->scene_graph, GF_SG_FIELD_REPLACE);
@@ -1763,6 +1757,7 @@ static GF_Err swf_bifs_show_frame(SWFReader *read)
 		*((SFInt32 *)f->field_ptr) = -1;
 		gf_list_add(read->bifs_au->commands, com);
 	}
+#endif
 
 	/*create a new AU for next frame*/
 	ts = (read->current_frame + 1) * 100;
@@ -1917,7 +1912,7 @@ static GF_Err swf_bifs_define_button(SWFReader *read, SWF_Button *btn)
 		}
 		if (character) {
 			SFInt32 choice = 0;
-			GF_Node *n = s2b_wrap_node(read, character, &br->mx, &br->cmx);
+			n = s2b_wrap_node(read, character, &br->mx, &br->cmx);
 
 			sprintf(szName, "BTN%d_R%d", btn->ID, i+1);
 			button = (M_Switch *) s2b_button_add_child(read, btn_root, TAG_MPEG4_Switch, szName, pos);
@@ -1969,17 +1964,19 @@ static GF_Err swf_bifs_define_button(SWFReader *read, SWF_Button *btn)
 	return GF_OK;
 }
 
-static void swf_bifs_finalize(SWFReader *read)
+static void swf_bifs_finalize(SWFReader *read, Bool is_destroy)
 {
 	u32 i, count;
-
-	swf_bifs_end_of_clip(read);
+	if (!is_destroy)
+		swf_bifs_end_of_clip(read);
 
 	while (gf_list_count(read->buttons)) {
 		S2BBtnRec *btnrec = gf_list_get(read->buttons, 0);
 		gf_list_rem(read->buttons, 0);
 		gf_free(btnrec);
 	}
+	gf_list_del(read->buttons);
+	read->buttons = NULL;
 
 	count = gf_list_count(read->fonts);
 	for (i=0; i<count; i++) {
@@ -2029,7 +2026,6 @@ Bool swf_bifs_action(SWFReader *read, SWFAction *act)
 		url.count = 1;
 		url.vals = &sfurl;
 		s2b_set_field(read, dst, n, "url", -1, GF_SG_VRML_MFURL, &url, 0);
-		s2b_set_field(read, dst, n, "parameter", -1, GF_SG_VRML_MFSTRING, &url, 0);
 		bval = 1;
 		s2b_set_field(read, dst, n, "activate", -1, GF_SG_VRML_SFBOOL, &bval, 0);
 		break;
@@ -2075,8 +2071,16 @@ GF_Err swf_to_bifs_init(SWFReader *read)
 	read->action = swf_bifs_action;
 	read->finalize = swf_bifs_finalize;
 
+#ifdef GPAC_ENABLE_COVERAGE
+	if (gf_sys_is_cov_mode()) {
+		swf_nstart(NULL, NULL, NULL, NULL, 0);
+		swf_nend(NULL, NULL, NULL);
+		swf_ntext(NULL, NULL, GF_FALSE);
+	}
+#endif
+
 	/*create BIFS stream*/
-	read->bifs_es = gf_sm_stream_new(read->load->ctx, 1, GF_STREAM_SCENE, 0x01);
+	read->bifs_es = gf_sm_stream_new(read->load->ctx, 1, GF_STREAM_SCENE, GF_CODECID_BIFS);
 	read->bifs_es->timeScale = read->frame_rate*100;
 
 	read->bifs_au = gf_sm_stream_au_new(read->bifs_es, 0, 0.0, 1);
@@ -2087,7 +2091,6 @@ GF_Err swf_to_bifs_init(SWFReader *read)
 	read->load->ctx->is_pixel_metrics = 1;
 
 	gf_list_add(read->bifs_au->commands, com);
-	read->load->scene_graph = read->load->scene_graph;
 
 	/*create base tree*/
 	com->node = read->root = s2b_new_node(read, TAG_MPEG4_OrderedGroup);
@@ -2098,12 +2101,16 @@ GF_Err swf_to_bifs_init(SWFReader *read)
 	gf_node_insert_child(read->root, n, -1);
 	gf_node_register(n, read->root);
 	((M_WorldInfo *)n)->title.buffer = gf_strdup("GPAC SWF CONVERTION DISCLAIMER");
-	gf_sg_vrml_mf_alloc( & ((M_WorldInfo *)n)->info, GF_SG_VRML_MFSTRING, 3);
+	gf_sg_vrml_mf_alloc( & ((M_WorldInfo *)n)->info, GF_SG_VRML_MFSTRING, 2);
 
 	sprintf(szMsg, "%s file converted to MPEG-4 Systems", read->load->fileName);
 	((M_WorldInfo *)n)->info.vals[0] = gf_strdup(szMsg);
-	((M_WorldInfo *)n)->info.vals[1] = gf_strdup("Conversion done using GPAC version " GPAC_FULL_VERSION " - (C) 2000-2005 GPAC");
-	((M_WorldInfo *)n)->info.vals[2] = gf_strdup("Macromedia SWF to MPEG-4 Conversion mapping released under GPL license");
+	if (gf_sys_is_test_mode()) {
+		sprintf(szMsg, "Conversion done using GPAC");
+	} else {
+		sprintf(szMsg, "Conversion done using GPAC version %s - %s", gf_gpac_version(), gf_gpac_copyright() );
+	}
+	((M_WorldInfo *)n)->info.vals[1] = gf_strdup(szMsg);
 
 	/*background*/
 	n = s2b_new_node(read, TAG_MPEG4_Background2D);
@@ -2155,7 +2162,6 @@ GF_Err swf_to_bifs_init(SWFReader *read)
 	/*setup IndexedCurve2D proto*/
 	if (read->flags & GF_SM_SWF_USE_IC2D) {
 		GF_ProtoFieldInterface *pfield;
-		GF_FieldInfo info;
 		SFURL *url;
 		Fixed ftMin, ftMax;
 		GF_Proto *proto = gf_sg_proto_new(read->load->scene_graph, 1, "IndexedCurve2D", 0);
@@ -2203,7 +2209,7 @@ GF_Err swf_to_bifs_init(SWFReader *read)
 	esd->ESID = esd->OCRESID = 3;
 	esd->dependsOnESID = 1;
 	esd->decoderConfig->streamType = GF_STREAM_SCENE;
-	esd->decoderConfig->objectTypeIndication = GPAC_OTI_SCENE_BIFS;
+	esd->decoderConfig->objectTypeIndication = GF_CODECID_BIFS;
 	esd->slConfig->timestampResolution = read->bifs_es->timeScale;
 	gf_odf_desc_del((GF_Descriptor *) esd->decoderConfig->decoderSpecificInfo);
 	esd->decoderConfig->decoderSpecificInfo = NULL;
@@ -2216,7 +2222,7 @@ GF_Err swf_to_bifs_init(SWFReader *read)
 
 	/*setup a new BIFS context*/
 	prev_sc = read->bifs_es;
-	read->bifs_es = gf_sm_stream_new(read->load->ctx, esd->ESID, GF_STREAM_SCENE, 1);
+	read->bifs_es = gf_sm_stream_new(read->load->ctx, esd->ESID, GF_STREAM_SCENE, GF_CODECID_BIFS);
 	read->bifs_es->timeScale = prev_sc->timeScale;
 	/*create first AU*/
 	read->bifs_au = gf_sm_stream_au_new(read->bifs_es, 0, 0, 1);

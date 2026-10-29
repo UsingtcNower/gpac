@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -28,9 +28,8 @@
 #include "visual_manager.h"
 #include "texturing.h"
 #include "nodes_stacks.h"
-#include <gpac/options.h>
 
-#ifndef GPAC_DISABLE_3D
+#if !defined(GPAC_DISABLE_3D) && !defined(GPAC_DISABLE_COMPOSITOR)
 
 #ifdef GPAC_USE_TINYGL
 #include <GL/oscontext.h>
@@ -52,11 +51,10 @@ GF_Err compositor_3d_set_aspect_ratio(GF_Compositor *compositor)
 	compositor->vp_y = 0;
 
 	scaleX = scaleY = FIX_ONE;
-	if (!compositor->has_size_info) {
+	if (!compositor->has_size_info || compositor->inherit_type_3d) {
 		compositor->visual->width = compositor->vp_width;
 		compositor->visual->height = compositor->vp_height;
 	} else {
-
 		switch (compositor->aspect_ratio) {
 		case GF_ASPECT_RATIO_FILL_SCREEN:
 			break;
@@ -106,16 +104,20 @@ GF_Err compositor_3d_set_aspect_ratio(GF_Compositor *compositor)
 	evt.setup.width = compositor->display_width;
 	evt.setup.height = compositor->display_height;
 	evt.setup.back_buffer = GF_TRUE;
+	evt.setup.disable_vsync = compositor->bench_mode ? GF_TRUE : GF_FALSE;
 #ifdef GPAC_USE_TINYGL
-	evt.setup.opengl_mode = 0;
+	evt.setup.use_opengl = GF_FALSE;
 #else
-	evt.setup.opengl_mode = 1;
+	evt.setup.use_opengl = GF_TRUE;
 	compositor->is_opengl = GF_TRUE;
 #endif
 
 	if (compositor->video_out->ProcessEvent(compositor->video_out, &evt)<0) {
 		gf_sc_reset_graphics(compositor);
 		return GF_OK;
+	}
+	if (evt.setup.use_opengl) {
+		gf_opengl_init();
 	}
 
 #if defined(GPAC_USE_TINYGL)
@@ -125,12 +127,12 @@ GF_Err compositor_3d_set_aspect_ratio(GF_Compositor *compositor)
 		GF_Err e = compositor->video_out->LockBackBuffer(compositor->video_out, &bb, 1);
 		if (e==GF_OK) {
 			switch (bb.pixel_format) {
-			case GF_PIXEL_RGB_32:
+			case GF_PIXEL_RGBX:
 			case GF_PIXEL_ARGB:
 				bpp = 32;
 				break;
-			case GF_PIXEL_RGB_24:
-			case GF_PIXEL_BGR_24:
+			case GF_PIXEL_RGB:
+			case GF_PIXEL_BGR:
 				bpp = 24;
 				break;
 			case GF_PIXEL_RGB_565:
@@ -205,7 +207,7 @@ void compositor_3d_draw_bitmap(Drawable *stack, DrawAspect2D *asp, GF_TraverseSt
 	visual_3d_enable_antialias(tr_state->visual, GF_FALSE);
 
 	visual_3d_set_material_2d_argb(tr_state->visual, GF_COL_ARGB(alpha, 0xFF, 0xFF, 0xFF));
-	
+		
 	if (alpha && (alpha != 0xFF)) {
 		gf_sc_texture_set_blend_mode(txh, TX_MODULATE);
 	} else if (gf_sc_texture_is_transparent(txh)) {
@@ -213,6 +215,7 @@ void compositor_3d_draw_bitmap(Drawable *stack, DrawAspect2D *asp, GF_TraverseSt
 	} else {
 		visual_3d_set_state(tr_state->visual, V3D_STATE_BLEND, GF_FALSE);
 	}
+
 	/*ignore texture transform for bitmap*/
 	tr_state->mesh_num_textures = gf_sc_texture_enable(txh, NULL);
 	if (tr_state->mesh_num_textures) {
@@ -224,7 +227,24 @@ void compositor_3d_draw_bitmap(Drawable *stack, DrawAspect2D *asp, GF_TraverseSt
 				size.y = height;
 
 				stack->mesh = new_mesh();
-				mesh_new_rectangle(stack->mesh, size, NULL, GF_FALSE);
+				if (txh->stream) {
+					const GF_PropertyValue *srd = NULL;
+					const GF_PropertyValue *srd_ref = NULL;
+					if (txh->stream->odm && txh->stream->odm->pid) {
+						srd = gf_filter_pid_get_property(txh->stream->odm->pid, GF_PROP_PID_SRD_MAP);
+						srd_ref = gf_filter_pid_get_property(txh->stream->odm->pid, GF_PROP_PID_SRD_REF);
+					}
+
+					if (srd && srd_ref) {
+void mesh_new_planar_srd(GF_Mesh *mesh, SFVec2f size, u32 flip, u32 rotate, const GF_PropertyValue *srd_map, const GF_PropertyValue *srd_ref);
+						mesh_new_planar_srd(stack->mesh, size, txh->stream->flip, txh->stream->rotate, srd, srd_ref);
+
+					} else {
+						mesh_new_rectangle_ex(stack->mesh, size, NULL, txh->stream->flip, txh->stream->rotate);
+					}
+				} else {
+					mesh_new_rectangle(stack->mesh, size, NULL, GF_FALSE);
+				}
 			}
 		}
 		if (stack->mesh) {
@@ -232,7 +252,7 @@ void compositor_3d_draw_bitmap(Drawable *stack, DrawAspect2D *asp, GF_TraverseSt
 			if (tr_state->depth_offset) {
 				GF_Matrix mx;
 				Fixed offset;
-				Fixed disp_depth = (compositor->display_depth<0) ? INT2FIX(tr_state->visual->height) : INT2FIX(compositor->display_depth);
+				Fixed disp_depth = (compositor->dispdepth<0) ? INT2FIX(tr_state->visual->height) : INT2FIX(compositor->dispdepth);
 				if (disp_depth) {
 					GF_Matrix bck_mx;
 					if (!tr_state->pixel_metrics) disp_depth = gf_divfix(disp_depth, tr_state->min_hsize);
@@ -261,5 +281,4 @@ void compositor_3d_draw_bitmap(Drawable *stack, DrawAspect2D *asp, GF_TraverseSt
 }
 
 
-#endif
-
+#endif //!defined(GPAC_DISABLE_3D) && !defined(GPAC_DISABLE_COMPOSITOR)

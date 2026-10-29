@@ -57,8 +57,6 @@ GF_Err RAW_Setup(GF_VideoOutput *dr, void *os_handle, void *os_display, u32 init
 {
 	AndroidBitmapInfo  info;
 	RAWCTX;
-	void * pixels;
-	int ret;
 
 	GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("Android vout RAW_Setup\n"));
 
@@ -101,7 +99,6 @@ static GF_Err RAW_Flush(GF_VideoOutput *dr, GF_Window *dest)
 static GF_Err RAW_LockBackBuffer(GF_VideoOutput *dr, GF_VideoSurface *vi, Bool do_lock)
 {
 	RAWCTX;
-	int ret;
 	void * pixels;
 
 	GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("Android vout RAW_LockBackBuffer: %d\n", do_lock));
@@ -110,8 +107,9 @@ static GF_Err RAW_LockBackBuffer(GF_VideoOutput *dr, GF_VideoSurface *vi, Bool d
 		GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("Android vout locked_data: %d\n", rc->locked_data));
 		if (!rc->locked_data)
 		{
+			int ret;
 			if ((ret = AndroidBitmap_lockPixels(rc->env, *(rc->bitmap), &pixels)) < 0) {
-				GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("Android vout lock failed\n"));
+				GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("Android vout lock failed (%d)\n", ret));
 			}
 			rc->locked_data = pixels;
 		}
@@ -156,7 +154,7 @@ GF_VideoOutput *NewRawVideoOutput()
 	AndroidContext *pCtx;
 	GF_VideoOutput *driv = (GF_VideoOutput *) gf_malloc(sizeof(GF_VideoOutput));
 	memset(driv, 0, sizeof(GF_VideoOutput));
-	GF_REGISTER_MODULE_INTERFACE(driv, GF_VIDEO_OUTPUT_INTERFACE, "Android Video Output", "gpac distribution")
+	GF_REGISTER_MODULE_INTERFACE(driv, GF_VIDEO_OUTPUT_INTERFACE, "androidbmp", "gpac distribution")
 
 	pCtx = gf_malloc(sizeof(AndroidContext));
 	memset(pCtx, 0, sizeof(AndroidContext));

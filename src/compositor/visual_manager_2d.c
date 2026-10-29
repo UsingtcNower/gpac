@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / Scene Compositor sub-project
@@ -27,6 +27,8 @@
 
 #include "visual_manager.h"
 #include "nodes_stacks.h"
+
+#if !defined(GPAC_DISABLE_COMPOSITOR)
 
 //#define SKIP_CONTEXT
 
@@ -87,7 +89,6 @@ DrawableContext *visual_2d_get_drawable_context(GF_VisualManager *visual)
 		visual->num_nodes_current_frame ++;
 		return visual->context;
 	}
-//	assert(visual->cur_context);
 	/*current context is OK*/
 	if (!visual->cur_context->drawable) {
 		/*reset next context in display list for next call*/
@@ -98,7 +99,6 @@ DrawableContext *visual_2d_get_drawable_context(GF_VisualManager *visual)
 	/*need a new context and next one is OK*/
 	if (visual->cur_context->next) {
 		visual->cur_context = visual->cur_context->next;
-//		assert(visual->cur_context->drawable == NULL);
 		/*reset next context in display list for next call*/
 		if (visual->cur_context->next) visual->cur_context->next->drawable = NULL;
 		drawctx_reset(visual->cur_context);
@@ -131,7 +131,7 @@ DrawableContext *visual_2d_get_drawable_context(GF_VisualManager *visual)
 
 void visual_2d_remove_last_context(GF_VisualManager *visual)
 {
-	assert(visual->cur_context);
+	gf_assert(visual->cur_context);
 	visual->cur_context->drawable = NULL;
 }
 
@@ -169,6 +169,7 @@ void visual_2d_drawable_delete(GF_VisualManager *visual, struct _drawable *drawa
 	}
 }
 
+#if 0 //unused
 Bool visual_2d_node_cull(GF_TraverseState *tr_state, GF_Rect *bounds)
 {
 	GF_Rect rc;
@@ -179,6 +180,7 @@ Bool visual_2d_node_cull(GF_TraverseState *tr_state, GF_Rect *bounds)
 	if (gf_irect_overlaps(&tr_state->visual->top_clipper, &i_rc)) return 1;
 	return 0;
 }
+#endif
 
 void visual_2d_setup_projection(GF_VisualManager *visual, GF_TraverseState *tr_state)
 {
@@ -193,7 +195,7 @@ void visual_2d_setup_projection(GF_VisualManager *visual, GF_TraverseState *tr_s
 	/*setup clipper*/
 	if (visual->center_coords) {
 		if (!visual->offscreen) {
-			if (visual->compositor->scalable_zoom)
+			if (visual->compositor->sz)
 				rc = gf_rect_center(INT2FIX(visual->compositor->display_width), INT2FIX(visual->compositor->display_height));
 			else
 				rc = gf_rect_center(INT2FIX(visual->compositor->output_width + 2*visual->compositor->vp_x), INT2FIX(visual->compositor->output_height + 2*visual->compositor->vp_y));
@@ -257,7 +259,7 @@ GF_Err visual_2d_init_draw(GF_VisualManager *visual, GF_TraverseState *tr_state)
 	DrawableContext *ctx;
 	M_Background2D *bck;
 #endif
-	u32 draw_mode;
+	u32 mode2d;
 
 	/*reset display list*/
 	visual->cur_context = visual->context;
@@ -265,6 +267,8 @@ GF_Err visual_2d_init_draw(GF_VisualManager *visual, GF_TraverseState *tr_state)
 	visual->has_modif = 0;
 	visual->has_overlays = 0;
 
+	memset(&visual->frame_bounds, 0, sizeof(GF_IRect));
+	
 	visual_2d_setup_projection(visual, tr_state);
 	if (!visual->top_clipper.width || !visual->top_clipper.height)
 		return GF_OK;
@@ -278,15 +282,15 @@ GF_Err visual_2d_init_draw(GF_VisualManager *visual, GF_TraverseState *tr_state)
 		return e;
 
 	tr_state->immediate_for_defer = GF_FALSE;
-	draw_mode = 0;
+	mode2d = 0;
 	if (tr_state->immediate_draw) {
-		draw_mode = 1;
+		mode2d = 1;
 	}
 	/*if we're requested to invalidate everything, switch to direct drawing but don't reset bounds*/
 	else if (tr_state->invalidate_all) {
 		tr_state->immediate_draw = 1;
 		tr_state->immediate_for_defer = GF_TRUE;
-		draw_mode = 2;
+		mode2d = 2;
 	}
 	tr_state->invalidate_all = 0;
 
@@ -296,7 +300,7 @@ GF_Err visual_2d_init_draw(GF_VisualManager *visual, GF_TraverseState *tr_state)
 	it = visual->prev_nodes;
 	while (it) {
 		/*node was not drawn on this visual*/
-		if (!drawable_flush_bounds(it->drawable, visual, draw_mode)) {
+		if (!drawable_flush_bounds(it->drawable, visual, mode2d)) {
 			GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("[Visual2D] Unregistering previously drawn node %s from visual\n", gf_node_get_class_name(it->drawable->node)));
 
 			/*remove all bounds info related to this visual and unreg node */
@@ -316,8 +320,8 @@ GF_Err visual_2d_init_draw(GF_VisualManager *visual, GF_TraverseState *tr_state)
 			count++;
 		}
 	}
-	GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("[Visual2D] Top visual initialized - %d nodes registered and %d removed - using %s rendering\n", count, rem, draw_mode ? "direct" : "dirty-rect"));
-	if (!draw_mode) return GF_OK;
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("[Visual2D] Top visual initialized - %d nodes registered and %d removed - using %s rendering\n", count, rem, mode2d ? "direct" : "dirty-rect"));
+	if (!mode2d) return GF_OK;
 
 #ifndef GPAC_DISABLE_VRML
 	/*direct mode, draw background*/
@@ -372,33 +376,13 @@ Bool gf_irect_inside(GF_IRect *rc1, GF_IRect *rc2)
 /*is list empty*/
 #define ra_is_empty(ra) (!((ra)->count))
 
-/*adds @rc2 to @rc1 - the new @rc1 contains the old @rc1 and @rc2*/
-void gf_irect_union(GF_IRect *rc1, GF_IRect *rc2)
-{
-	if (!rc1->width || !rc1->height) {
-		*rc1=*rc2;
-		return;
-	}
-
-	if (rc2->x < rc1->x) {
-		rc1->width += rc1->x - rc2->x;
-		rc1->x = rc2->x;
-	}
-	if (rc2->x + rc2->width > rc1->x+rc1->width) rc1->width = rc2->x + rc2->width - rc1->x;
-	if (rc2->y > rc1->y) {
-		rc1->height += rc2->y - rc1->y;
-		rc1->y = rc2->y;
-	}
-	if (rc2->y - rc2->height < rc1->y - rc1->height) rc1->height = rc1->y - rc2->y + rc2->height;
-}
-
 
 /*adds rectangle to the list performing union test*/
 void ra_union_rect(GF_RectArray *ra, GF_IRect *rc)
 {
 	u32 i;
 
-	assert(rc->width && rc->height);
+	gf_assert(rc->width && rc->height);
 
 	for (i=0; i<ra->count; i++) {
 		if (gf_irect_overlaps(&ra->list[i].rect, rc)) {
@@ -472,7 +456,7 @@ static u32 register_context_rect(GF_RectArray *ra, DrawableContext *ctx, u32 ctx
 	Bool is_transparent = 1;
 #endif
 	GF_IRect *rc = &ctx->bi->clip;
-	assert(rc->width && rc->height);
+	gf_assert(rc->width && rc->height);
 
 	/*node is modified*/
 	needs_redraw = (ctx->flags & CTX_REDRAW_MASK) ? 1 : 0;
@@ -650,7 +634,6 @@ Bool visual_2d_terminate_draw(GF_VisualManager *visual, GF_TraverseState *tr_sta
 		drawctx_update_info(ctx, visual);
 		if (!redraw_all) {
 			u32 res;
-//			assert( gf_irect_inside(&visual->top_clipper, &ctx->bi->clip) );
 			res = register_context_rect(&visual->to_redraw, ctx, num_nodes, &first_opaque);
 			if (res) {
 				num_changed ++;
@@ -670,7 +653,6 @@ Bool visual_2d_terminate_draw(GF_VisualManager *visual, GF_TraverseState *tr_sta
 	while (it) {
 		while (drawable_get_previous_bound(it->drawable, &refreshRect, visual)) {
 			if (!redraw_all) {
-				//assert( gf_irect_inside(&visual->top_clipper, &refreshRect) );
 				gf_irect_intersect(&refreshRect, &visual->top_clipper);
 				register_dirty_rect(&visual->to_redraw, &refreshRect);
 				has_clear=1;
@@ -719,13 +701,14 @@ Bool visual_2d_terminate_draw(GF_VisualManager *visual, GF_TraverseState *tr_sta
 		if (!hyb_force_redraw && !hyb_force_background) {
 #ifndef GPAC_DISABLE_3D
 			//force canvas draw
-			visual->nb_objects_on_canvas_since_last_ogl_flush = 1;
+			if ((visual==visual->compositor->visual) && visual->prev_hybgl_canvas_not_empty)
+				visual->nb_objects_on_canvas_since_last_ogl_flush = 1;
 #endif
 			GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("[Visual2D] No changes found since last frame - skipping redraw\n"));
 			goto exit;
 		}
 
-		//openGL, force redraw of complete scene but signal we shoud only draw the background, not clear the canvas (nothing to redraw except GL textures)
+		//OpenGL, force redraw of complete scene but signal we shoud only draw the background, not clear the canvas (nothing to redraw except GL textures)
 		if (hyb_force_redraw) { 
 			hyb_force_background = 2;
 			ra_add(&visual->to_redraw, &visual->surf_rect);
@@ -735,7 +718,7 @@ Bool visual_2d_terminate_draw(GF_VisualManager *visual, GF_TraverseState *tr_sta
 	tr_state->traversing_mode = TRAVERSE_DRAW_2D;
 
 	//if only one opaque object has changed and not moved, skip background unless hybgl mode
-	if (!visual->compositor->hybrid_opengl && !hyb_force_redraw && !hyb_force_background && first_opaque && (visual->to_redraw.count==1) && gf_rect_equal(first_opaque->bi->clip, visual->to_redraw.list[0].rect)) {
+	if (!visual->compositor->hybrid_opengl && !hyb_force_redraw && !hyb_force_background && first_opaque && (visual->to_redraw.count==1) && irect_rect_equal(&first_opaque->bi->clip, &visual->to_redraw.list[0].rect)) {
 		visual->has_modif=0;
 		goto skip_background;
 	}
@@ -759,7 +742,7 @@ Bool visual_2d_terminate_draw(GF_VisualManager *visual, GF_TraverseState *tr_sta
 		bck_ctx->next = visual->context;
 		bck_ctx->flags |= CTX_BACKROUND_NOT_LAYER;
 
-		//for hybrid openGL, only redraw background but do not erase canvas
+		//for hybrid OpenGL, only redraw background but do not erase canvas
 		if (hyb_force_background==2)
 			bck_ctx->flags |= CTX_BACKROUND_NO_CLEAR;
 
@@ -772,13 +755,13 @@ Bool visual_2d_terminate_draw(GF_VisualManager *visual, GF_TraverseState *tr_sta
 	{
 
 #ifndef GPAC_DISABLE_3D
-		//cleanup openGL screen
+		//cleanup OpenGL screen
 		if (visual->compositor->hybrid_opengl) {
 			compositor_2d_hybgl_clear_surface(tr_state->visual, NULL, 0, GF_FALSE);
 		}
 #endif
 
-		//and clean dirty rect - for hybrid openGL this will clear the canvas, otherwise the 2D backbuffer
+		//and clean dirty rect - for hybrid OpenGL this will clear the canvas, otherwise the 2D backbuffer
 		count = visual->to_redraw.count;
 		for (k=0; k<count; k++) {
 			GF_IRect rc;
@@ -794,7 +777,8 @@ Bool visual_2d_terminate_draw(GF_VisualManager *visual, GF_TraverseState *tr_sta
 		visual->has_modif=0;
 #ifndef GPAC_DISABLE_3D
 		//force canvas flush
-		visual->nb_objects_on_canvas_since_last_ogl_flush = 1;
+		if ((visual==visual->compositor->visual) && visual->prev_hybgl_canvas_not_empty)
+			visual->nb_objects_on_canvas_since_last_ogl_flush = 1;
 #endif
 		goto exit;
 	}
@@ -805,17 +789,24 @@ skip_background:
 
 #ifndef GPAC_DISABLE_LOG
 	if (gf_log_tool_level_on(GF_LOG_COMPOSE, GF_LOG_DEBUG)) {
-		GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("[Visual2D] Redraw %d / %d nodes (all: %s - %d dirty rects\n)", num_changed, num_nodes, redraw_all ? "yes" : "no", visual->to_redraw.count));
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("[Visual2D] Redraw %d / %d nodes (all: %s - %d dirty rects)\n", num_changed, num_nodes, redraw_all ? "yes" : "no", visual->to_redraw.count));
 		if (visual->to_redraw.count>1) GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("\n"));
 
 		for (i=0; i<visual->to_redraw.count; i++) {
 			GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("\tDirtyRect #%d: %d:%d@%dx%d\n", i+1, visual->to_redraw.list[i].rect.x, visual->to_redraw.list[i].rect.y, visual->to_redraw.list[i].rect.width, visual->to_redraw.list[i].rect.height));
-			assert(visual->to_redraw.list[i].rect.width);
+			gf_assert(visual->to_redraw.list[i].rect.width);
 		}
 	}
 #endif
 
 	visual->draw_node_index = 0;
+
+#ifndef GPAC_DISABLE_3D
+	//consider nothing is drawn on hyblg canvas. If any of the refresh area(s) triggers painting on the canvas
+	//the variable will be set while flushing
+	if (visual==visual->compositor->visual)
+		visual->prev_hybgl_canvas_not_empty = GF_FALSE;
+#endif
 
 	ctx = visual->context;
 	while (ctx && ctx->drawable) {
@@ -825,12 +816,7 @@ skip_background:
 
 		/*if overlay we cannot remove the context and cannot draw directly*/
 		if (! visual_2d_overlaps_overlay(tr_state->visual, ctx, tr_state)) {
-
-			if (ctx->drawable->flags & DRAWABLE_USE_TRAVERSE_DRAW) {
-				gf_node_traverse(ctx->drawable->node, tr_state);
-			} else {
-				drawable_draw(ctx->drawable, tr_state);
-			}
+			call_drawable_draw(ctx, tr_state, GF_FALSE);
 		}
 		ctx = ctx->next;
 	}
@@ -842,14 +828,13 @@ skip_background:
 
 	if (visual->direct_flush) {
 		GF_DirtyRectangles dr;
-		u32 i;
 		dr.count = visual->to_redraw.count;
 		dr.list = gf_malloc(sizeof(GF_IRect)*dr.count);
 		for (i=0; i<dr.count; i++) {
 			dr.list[i] = visual->to_redraw.list[i].rect;
 		}
 		visual->compositor->video_out->FlushRectangles(visual->compositor->video_out, &dr);
-		visual->compositor->skip_flush=1;
+		visual->compositor->skip_flush = 1;
 		gf_free(dr.list);
 	}
 
@@ -864,7 +849,6 @@ exit:
 
 Bool visual_2d_draw_frame(GF_VisualManager *visual, GF_Node *root, GF_TraverseState *tr_state, Bool is_root_visual)
 {
-	GF_SceneGraph *sg;
 	GF_Matrix2D backup;
 	u32 i;
 	Bool res;
@@ -876,10 +860,21 @@ Bool visual_2d_draw_frame(GF_VisualManager *visual, GF_Node *root, GF_TraverseSt
 	gf_mx2d_copy(backup, tr_state->transform);
 	visual->bounds_tracker_modif_flag = DRAWABLE_HAS_CHANGED;
 
+#ifndef GPAC_DISABLE_3D
+	if (visual->compositor->hybrid_opengl && visual->compositor->fbo_id) {
+		compositor_3d_enable_fbo(visual->compositor, GF_TRUE);
+	}
+#endif
+
 	e = visual_2d_init_draw(visual, tr_state);
 	if (e) {
 		gf_mx2d_copy(tr_state->transform, backup);
 		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Visual2D] Cannot init draw phase: %s\n", gf_error_to_string(e)));
+#ifndef GPAC_DISABLE_3D
+		if (visual->compositor->hybrid_opengl && visual->compositor->fbo_id) {
+			compositor_3d_enable_fbo(visual->compositor, GF_FALSE);
+		}
+#endif
 		return 0;
 	}
 
@@ -892,6 +887,7 @@ Bool visual_2d_draw_frame(GF_VisualManager *visual, GF_Node *root, GF_TraverseSt
 	GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("[Visual2D] Traversing scene subtree (root node %s)\n", root ? gf_node_get_class_name(root) : "none"));
 
 	if (is_root_visual) {
+		GF_SceneGraph *sg;
 		gf_node_traverse(root, tr_state);
 
 		i=0;
@@ -917,6 +913,11 @@ Bool visual_2d_draw_frame(GF_VisualManager *visual, GF_Node *root, GF_TraverseSt
 	}
 #endif
 
+#ifndef GPAC_DISABLE_3D
+	if (visual->compositor->hybrid_opengl && visual->compositor->fbo_id) {
+		compositor_3d_enable_fbo(visual->compositor, GF_FALSE);
+	}
+#endif
 	return res;
 }
 
@@ -963,3 +964,5 @@ void visual_2d_pick_node(GF_VisualManager *visual, GF_TraverseState *tr_state, G
 	gf_mx2d_copy(tr_state->transform, backup);
 }
 
+
+#endif //!defined(GPAC_DISABLE_COMPOSITOR)
